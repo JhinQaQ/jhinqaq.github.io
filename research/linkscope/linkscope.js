@@ -10,19 +10,11 @@
   const submitButton = form.querySelector('button[type="submit"]');
   const encoder = new TextEncoder();
   const decoder = new TextDecoder("utf-8", { fatal: true });
+  const fixedAdditionalData = encoder.encode("linkscope-research-draft-v1");
 
-  let envelopePromise;
-  let payload;
-  let selectedScenario = "s0";
-  let selectedBaseline = "fresh";
-  let scenarioButtons = [];
-  let baselineButtons = [];
-
-  const safeTags = new Set([
+  const allowedTags = new Set([
     "a",
-    "article",
     "aside",
-    "blockquote",
     "button",
     "code",
     "div",
@@ -30,29 +22,59 @@
     "h1",
     "h2",
     "h3",
-    "i",
     "header",
     "li",
     "main",
-    "nav",
+    "ol",
     "p",
     "pre",
     "section",
     "span",
     "strong",
-    "table",
-    "tbody",
-    "td",
-    "th",
-    "thead",
-    "tr",
     "ul",
   ]);
+  const methodIds = ["fresh", "stale", "syntax", "linkscope"];
+  const snapshotIds = ["s0", "s1", "s2"];
+  const notebookCellIds = [
+    "define",
+    "compare",
+    "dependencies",
+    "concerns",
+    "discover",
+    "formal",
+  ];
+  const dependencyNodeIds = [
+    "proxy",
+    "link",
+    "code",
+    "dispatch",
+    "slice",
+    "summary",
+    "vc",
+    "outcome",
+  ];
+  const nodeStateIds = [
+    "checked",
+    "reused",
+    "invalidated",
+    "refuted",
+    "unjustified",
+  ];
+  const nodeStates = new Set(nodeStateIds);
+
+  let envelopePromise;
+  let payload;
+  let selectedSnapshot = "s1";
+  let selectedMethod = "linkscope";
+  let selectedNode = "summary";
+  let selectedConcern = "why_not_combine";
+  let selectedConcernStep = "";
+  let selectedPrior = 0;
+  let discoveryCount = 0;
+  let refs = {};
 
   function make(tag, className, text) {
-    if (!safeTags.has(tag)) {
-      throw new Error("Unsupported render node");
-    }
+    if (!allowedTags.has(tag)) throw new Error("Unsupported render node");
     const element = document.createElement(tag);
     if (className) element.className = className;
     if (text !== undefined && text !== null) {
@@ -61,7 +83,7 @@
     return element;
   }
 
-  function isPlainObject(value) {
+  function isObject(value) {
     return (
       value !== null &&
       typeof value === "object" &&
@@ -70,63 +92,444 @@
     );
   }
 
-  function requireString(value, label) {
-    if (typeof value !== "string") {
-      throw new Error(`Invalid ${label}`);
-    }
+  function requireObject(value, label) {
+    if (!isObject(value)) throw new Error(`Invalid ${label}`);
     return value;
   }
 
   function requireArray(value, label) {
-    if (!Array.isArray(value)) {
+    if (!Array.isArray(value)) throw new Error(`Invalid ${label}`);
+    return value;
+  }
+
+  function requireString(value, label) {
+    if (typeof value !== "string" || value.length === 0) {
       throw new Error(`Invalid ${label}`);
     }
     return value;
   }
 
-  function validatePayload(candidate) {
-    if (!isPlainObject(candidate)) throw new Error("Invalid payload");
-    if (!isPlainObject(candidate.meta)) throw new Error("Invalid metadata");
-    requireString(candidate.meta.pageTitle, "page title");
-    requireString(candidate.meta.title, "title");
-    requireString(candidate.meta.subtitle, "subtitle");
-    requireString(candidate.meta.pitch, "pitch");
-    requireArray(candidate.nav, "navigation");
-    requireArray(candidate.sections, "sections");
-    requireArray(candidate.scenarios, "scenarios");
-    requireArray(candidate.proofNodes, "proof nodes");
-    requireArray(candidate.baselines, "baselines");
+  function requireInteger(value, label) {
+    if (!Number.isInteger(value) || value < 0) {
+      throw new Error(`Invalid ${label}`);
+    }
+    return value;
+  }
 
-    const scenarioIds = new Set();
-    for (const scenario of candidate.scenarios) {
-      if (!isPlainObject(scenario)) throw new Error("Invalid scenario");
-      const id = requireString(scenario.id, "scenario id");
-      if (scenarioIds.has(id)) throw new Error("Duplicate scenario");
-      scenarioIds.add(id);
-      requireString(scenario.implementationCode, "implementation code");
-      if (!isPlainObject(scenario.nodeStates)) {
-        throw new Error("Invalid node state map");
+  function requireExactKeys(value, expected, label) {
+    const object = requireObject(value, label);
+    const actual = Object.keys(object);
+    if (
+      actual.length !== expected.length ||
+      expected.some((key) => !Object.hasOwn(object, key))
+    ) {
+      throw new Error(`Invalid ${label} keys`);
+    }
+    return object;
+  }
+
+  function requireAllowedKeys(value, allowed, label) {
+    const object = requireObject(value, label);
+    if (Object.keys(object).some((key) => !allowed.includes(key))) {
+      throw new Error(`Invalid ${label} keys`);
+    }
+    return object;
+  }
+
+  function requireExactIds(items, expected, label) {
+    const actual = items.map((item) =>
+      requireString(requireObject(item, label).id, `${label} id`),
+    );
+    if (
+      actual.length !== expected.length ||
+      expected.some((id, index) => actual[index] !== id) ||
+      new Set(actual).size !== actual.length
+    ) {
+      throw new Error(`Invalid ${label} identifiers`);
+    }
+  }
+
+  function validatePayload(candidate) {
+    requireObject(candidate, "payload");
+    if (candidate.schemaVersion !== 2) throw new Error("Unsupported payload");
+
+    const meta = requireObject(candidate.meta, "metadata");
+    [
+      "pageTitle",
+      "pathLabel",
+      "title",
+      "subtitle",
+      "status",
+      "oneSentenceClaim",
+      "footer",
+      "homeLabel",
+    ].forEach((field) => requireString(meta[field], `metadata ${field}`));
+
+    const notebook = requireObject(candidate.notebook, "notebook");
+    ["kernelLabel", "instructions"].forEach((field) =>
+      requireString(notebook[field], `notebook ${field}`),
+    );
+    const cells = requireArray(notebook.cells, "notebook cells");
+    requireExactIds(cells, notebookCellIds, "notebook cells");
+    for (const cellValue of cells) {
+      const cell = requireObject(cellValue, "notebook cell");
+      ["prompt", "title", "purpose"].forEach((field) =>
+        requireString(cell[field], `notebook cell ${field}`),
+      );
+    }
+
+    const model = requireObject(candidate.model, "model");
+    requireString(requireObject(model.proxy, "proxy").code, "proxy code");
+    const executionFrame = requireObject(
+      model.executionFrame,
+      "execution frame",
+    );
+    ["formula", "proofTransport"].forEach((field) =>
+      requireString(executionFrame[field], `execution frame ${field}`),
+    );
+    requireString(requireObject(model.query, "query").code, "query code");
+
+    const nodes = requireArray(candidate.dependencyNodes, "dependency nodes");
+    requireExactIds(nodes, dependencyNodeIds, "dependency nodes");
+    const nodeIds = new Set();
+    for (const nodeValue of nodes) {
+      const node = requireObject(nodeValue, "dependency node");
+      const id = requireString(node.id, "dependency node id");
+      if (nodeIds.has(id)) throw new Error("Duplicate dependency node");
+      nodeIds.add(id);
+      ["shortLabel", "label", "key", "description", "hardQuestion"].forEach(
+        (field) => requireString(node[field], `dependency node ${field}`),
+      );
+      requireArray(node.dependsOn, "node dependencies").forEach((dependency) =>
+        requireString(dependency, "node dependency"),
+      );
+    }
+    for (const nodeValue of nodes) {
+      const node = requireObject(nodeValue, "dependency node");
+      const dependencies = requireArray(
+        node.dependsOn,
+        "node dependencies",
+      );
+      if (
+        new Set(dependencies).size !== dependencies.length ||
+        dependencies.some(
+          (dependency) => dependency === node.id || !nodeIds.has(dependency),
+        )
+      ) {
+        throw new Error(`Invalid dependencies for ${node.id}`);
       }
-      if (!isPlainObject(scenario.strategies)) {
-        throw new Error("Invalid strategy map");
+    }
+    const visitState = new Map();
+    function visitNode(nodeId) {
+      const state = visitState.get(nodeId);
+      if (state === "visiting") throw new Error("Dependency graph contains a cycle");
+      if (state === "visited") return;
+      visitState.set(nodeId, "visiting");
+      const node = nodes.find((item) => item.id === nodeId);
+      node.dependsOn.forEach(visitNode);
+      visitState.set(nodeId, "visited");
+    }
+    dependencyNodeIds.forEach(visitNode);
+
+    const legend = requireArray(candidate.nodeStatusLegend, "node status legend");
+    requireExactIds(legend, nodeStateIds, "node status legend");
+    for (const itemValue of legend) {
+      const item = requireObject(itemValue, "node status legend item");
+      ["label", "meaning"].forEach((field) =>
+        requireString(item[field], `node status legend ${field}`),
+      );
+    }
+
+    const methods = requireArray(candidate.methods, "methods");
+    requireExactIds(methods, methodIds, "methods");
+    for (const methodValue of methods) {
+      const method = requireObject(methodValue, "method");
+      ["label", "tabLabel", "call", "short", "soundness", "keyRule"].forEach(
+        (field) => requireString(method[field], `method ${field}`),
+      );
+    }
+
+    const snapshots = requireArray(candidate.snapshots, "snapshots");
+    requireExactIds(snapshots, snapshotIds, "snapshots");
+    for (const snapshotValue of snapshots) {
+      const snapshot = requireObject(snapshotValue, "snapshot");
+      [
+        "tabLabel",
+        "title",
+        "selectedImplementation",
+        "linkFact",
+        "codeTitle",
+        "code",
+        "diffTitle",
+        "diff",
+        "relevantChange",
+      ].forEach((field) => requireString(snapshot[field], `snapshot ${field}`));
+      const reference = requireObject(
+        snapshot.referenceOutcome,
+        "reference outcome",
+      );
+      ["verdict", "label", "reason"].forEach((field) =>
+        requireString(reference[field], `reference outcome ${field}`),
+      );
+      const results = requireExactKeys(
+        snapshot.methodResults,
+        methodIds,
+        "method results",
+      );
+      for (const methodId of methodIds) {
+        const result = requireObject(results[methodId], "method result");
+        [
+          "returned",
+          "reference",
+          "correctness",
+          "tone",
+          "badge",
+          "headline",
+          "explanation",
+        ].forEach((field) =>
+          requireString(result[field], `method result ${field}`),
+        );
+        const work = requireObject(result.work, "work accounting");
+        const checked = requireInteger(
+          work.checkedOrRebuilt,
+          "checked work",
+        );
+        const reused = requireInteger(work.reused, "reused work");
+        const unjustified = requireInteger(
+          work.unjustifiedReuse,
+          "unjustified work",
+        );
+        if (
+          checked + reused + unjustified !==
+          dependencyNodeIds.length
+        ) {
+          throw new Error("Work accounting must total all dependency nodes");
+        }
+        const states = requireExactKeys(
+          result.nodeStates,
+          dependencyNodeIds,
+          "node states",
+        );
+        for (const nodeId of nodeIds) {
+          if (!nodeStates.has(states[nodeId])) {
+            throw new Error("Invalid dependency node state");
+          }
+        }
+        const stateCounts = {
+          checkedOrRebuilt: 0,
+          reused: 0,
+          unjustifiedReuse: 0,
+        };
+        for (const state of Object.values(states)) {
+          if (state === "reused") stateCounts.reused += 1;
+          else if (state === "unjustified") stateCounts.unjustifiedReuse += 1;
+          else stateCounts.checkedOrRebuilt += 1;
+        }
+        if (
+          stateCounts.checkedOrRebuilt !== checked ||
+          stateCounts.reused !== reused ||
+          stateCounts.unjustifiedReuse !== unjustified
+        ) {
+          throw new Error(
+            `Work accounting does not match node states for ${snapshot.id}/${methodId}`,
+          );
+        }
+        requireArray(result.trace, "method trace").forEach((line) =>
+          requireString(line, "method trace line"),
+        );
       }
+    }
+
+    const concerns = requireArray(
+      candidate.advisorConcerns,
+      "advisor concerns",
+    );
+    if (concerns.length < 5) throw new Error("Missing advisor concerns");
+    const concernIds = new Set();
+    for (const concernValue of concerns) {
+      const concern = requireObject(concernValue, "advisor concern");
+      const id = requireString(concern.id, "advisor concern id");
+      if (concernIds.has(id)) throw new Error("Duplicate advisor concern");
+      concernIds.add(id);
+      [
+        "tabLabel",
+        "question",
+        "shortAnswer",
+        "answer",
+        "code",
+        "bottomLine",
+      ].forEach((field) =>
+        requireString(concern[field], `advisor concern ${field}`),
+      );
+      const demo = requireObject(concern.clickDemo, "advisor demo");
+      if (
+        !snapshotIds.includes(demo.snapshot) ||
+        !methodIds.includes(demo.method) ||
+        !nodeIds.has(demo.node)
+      ) {
+        throw new Error("Invalid advisor demo");
+      }
+      const demoSteps = requireArray(
+        concern.demoSteps,
+        "advisor demo steps",
+      );
+      if (demoSteps.length === 0) throw new Error("Missing advisor demo steps");
+      for (const stepValue of demoSteps) {
+        const step = requireObject(stepValue, "advisor demo step");
+        requireString(step.label, "advisor demo step label");
+        if (
+          !snapshotIds.includes(step.snapshot) ||
+          !methodIds.includes(step.method) ||
+          !nodeIds.has(step.node)
+        ) {
+          throw new Error("Invalid advisor demo step");
+        }
+      }
+    }
+
+    const onDemand = requireObject(candidate.onDemand, "on-demand section");
+    ["title", "input", "rule"].forEach((field) =>
+      requireString(onDemand[field], `on-demand ${field}`),
+    );
+    const demandSteps = requireArray(onDemand.steps, "on-demand steps");
+    if (demandSteps.length < 4) throw new Error("Missing on-demand steps");
+    const demandStepIds = new Set();
+    for (const [index, stepValue] of demandSteps.entries()) {
+      const step = requireObject(stepValue, "on-demand step");
+      ["id", "label", "trigger", "fact", "evidence", "node"].forEach((field) =>
+        requireString(step[field], `on-demand step ${field}`),
+      );
+      if (
+        requireInteger(step.index, "on-demand step index") !== index + 1 ||
+        demandStepIds.has(step.id)
+      ) {
+        throw new Error("On-demand steps must have unique sequential indices");
+      }
+      demandStepIds.add(step.id);
+      if (!nodeIds.has(step.node)) throw new Error("Invalid demand node");
+      if (step.revealsAtS1 !== undefined) {
+        requireString(step.revealsAtS1, "on-demand S1 note");
+      }
+      if (step.snapshotOverrides !== undefined) {
+        const overrides = requireAllowedKeys(
+          step.snapshotOverrides,
+          snapshotIds,
+          "on-demand snapshot overrides",
+        );
+        for (const [snapshotId, overrideValue] of Object.entries(overrides)) {
+          const override = requireAllowedKeys(
+            overrideValue,
+            ["label", "trigger", "fact", "evidence", "note"],
+            `on-demand ${snapshotId} override`,
+          );
+          for (const value of Object.values(override)) {
+            requireString(value, `on-demand ${snapshotId} override value`);
+          }
+        }
+      }
+    }
+
+    const accounting = requireObject(
+      candidate.workAccounting,
+      "work accounting metadata",
+    );
+    requireString(accounting.unit, "work accounting unit");
+    requireString(accounting.disclaimer, "work accounting disclaimer");
+    if (accounting.totalPerRun !== dependencyNodeIds.length) {
+      throw new Error("Work accounting total does not match dependency nodes");
+    }
+
+    const formal = requireObject(candidate.formalCore, "formal core");
+    const theorems = requireArray(formal.theorems, "theorems");
+    if (theorems.length < 3) throw new Error("Missing formal claims");
+    for (const theoremValue of theorems) {
+      const theorem = requireObject(theoremValue, "theorem");
+      ["id", "title", "statement", "meaning"].forEach((field) =>
+        requireString(theorem[field], `theorem ${field}`),
+      );
+    }
+    requireString(formal.hardPart, "formal hard part");
+
+    const novelty = requireObject(
+      candidate.noveltyBoundary,
+      "novelty boundary",
+    );
+    [
+      "candidateTopic",
+      "candidateContribution",
+      "reviewerRisk",
+      "falsificationQuestion",
+    ].forEach((field) =>
+      requireString(novelty[field], `novelty ${field}`),
+    );
+    requireArray(novelty.notClaims, "not-claims");
+
+    const priorWork = requireArray(candidate.priorWork, "prior work");
+    if (priorWork.length < 3) throw new Error("Missing prior work");
+    for (const itemValue of priorWork) {
+      const item = requireObject(itemValue, "prior work item");
+      ["name", "url", "alreadyHas", "boundaryToTest"].forEach((field) =>
+        requireString(item[field], `prior work ${field}`),
+      );
+      safeLink(item.url);
     }
 
     return candidate;
   }
 
-  function safeLink(url) {
-    const value = requireString(url, "URL");
-    if (value.startsWith("/") || value.startsWith("#")) return value;
-    const parsed = new URL(value, window.location.origin);
-    if (parsed.protocol !== "https:") throw new Error("Unsafe URL");
-    return parsed.href;
+  function safeLink(value) {
+    const raw = requireString(value, "URL");
+    if (
+      raw !== raw.trim() ||
+      /[\u0000-\u001f\u007f\\]/u.test(raw) ||
+      raw.startsWith("//")
+    ) {
+      throw new Error("Unsafe URL");
+    }
+
+    let parsed;
+    let external = false;
+    if (raw.startsWith("#")) {
+      parsed = new URL(raw, window.location.href);
+      if (
+        parsed.origin !== window.location.origin ||
+        parsed.pathname !== window.location.pathname ||
+        parsed.search !== window.location.search
+      ) {
+        throw new Error("Unsafe URL");
+      }
+    } else if (raw.startsWith("/")) {
+      parsed = new URL(raw, window.location.origin);
+      if (parsed.origin !== window.location.origin) {
+        throw new Error("Unsafe URL");
+      }
+    } else {
+      if (!/^https:\/\//iu.test(raw)) throw new Error("Unsafe URL");
+      parsed = new URL(raw);
+      external = true;
+    }
+
+    if (
+      (external && parsed.protocol !== "https:") ||
+      parsed.username !== "" ||
+      parsed.password !== ""
+    ) {
+      throw new Error("Unsafe URL");
+    }
+
+    return {
+      external,
+      href: external
+        ? parsed.href
+        : `${parsed.pathname}${parsed.search}${parsed.hash}`,
+    };
   }
 
-  function link(label, href, className) {
+  function makeLink(label, href, className) {
     const anchor = make("a", className, label);
-    anchor.href = safeLink(href);
-    if (!href.startsWith("/") && !href.startsWith("#")) {
+    const safe = safeLink(href);
+    anchor.href = safe.href;
+    if (safe.external) {
       anchor.target = "_blank";
       anchor.rel = "noopener noreferrer";
     }
@@ -135,7 +538,7 @@
 
   function decodeBase64(value) {
     if (typeof value !== "string" || value.length === 0) {
-      throw new Error("Invalid base64 value");
+      throw new Error("Invalid base64");
     }
     const binary = atob(value);
     const bytes = new Uint8Array(binary.length);
@@ -143,6 +546,13 @@
       bytes[index] = binary.charCodeAt(index);
     }
     return bytes;
+  }
+
+  function sameBytes(left, right) {
+    return (
+      left.byteLength === right.byteLength &&
+      left.every((value, index) => value === right[index])
+    );
   }
 
   async function loadEnvelope() {
@@ -154,25 +564,40 @@
     if (!response.ok) throw new Error("Unable to load encrypted draft");
     const candidate = await response.json();
     if (
-      !isPlainObject(candidate) ||
+      !isObject(candidate) ||
       candidate.version !== 1 ||
-      !isPlainObject(candidate.kdf) ||
-      !isPlainObject(candidate.cipher) ||
+      !isObject(candidate.kdf) ||
+      !isObject(candidate.cipher) ||
       candidate.kdf.name !== "PBKDF2" ||
       candidate.kdf.hash !== "SHA-256" ||
       candidate.kdf.iterations !== 600000 ||
-      candidate.cipher.name !== "AES-GCM"
+      candidate.cipher.name !== "AES-GCM" ||
+      decodeBase64(candidate.kdf.salt).byteLength !== 16 ||
+      decodeBase64(candidate.cipher.iv).byteLength !== 12 ||
+      !sameBytes(
+        decodeBase64(candidate.cipher.additionalData),
+        fixedAdditionalData,
+      )
     ) {
       throw new Error("Unsupported encrypted draft");
     }
     return candidate;
   }
 
+  async function getEnvelope() {
+    if (!envelopePromise) {
+      envelopePromise = loadEnvelope().catch((error) => {
+        envelopePromise = undefined;
+        throw error;
+      });
+    }
+    return envelopePromise;
+  }
+
   async function decrypt(envelope, password) {
-    const normalizedPassword = password.normalize("NFKC");
-    const keyMaterial = await crypto.subtle.importKey(
+    const material = await crypto.subtle.importKey(
       "raw",
-      encoder.encode(normalizedPassword),
+      encoder.encode(password.normalize("NFKC")),
       "PBKDF2",
       false,
       ["deriveKey"],
@@ -184,7 +609,7 @@
         salt: decodeBase64(envelope.kdf.salt),
         iterations: envelope.kdf.iterations,
       },
-      keyMaterial,
+      material,
       { name: "AES-GCM", length: 256 },
       false,
       ["decrypt"],
@@ -202,26 +627,871 @@
     return decoder.decode(plaintext);
   }
 
-  function setBusy(isBusy) {
-    submitButton.disabled = isBusy;
-    phraseInput.disabled = isBusy;
-    revealButton.disabled = isBusy;
-    form.setAttribute("aria-busy", String(isBusy));
+  function setBusy(busy) {
+    submitButton.disabled = busy;
+    revealButton.disabled = busy;
+    phraseInput.disabled = busy;
+    form.setAttribute("aria-busy", String(busy));
   }
 
-  function showStatus(message, state = "neutral") {
+  function showGateStatus(message, state = "neutral") {
     status.textContent = message;
     status.dataset.state = state;
   }
 
+  function getSnapshot() {
+    return payload.snapshots.find((item) => item.id === selectedSnapshot);
+  }
+
+  function getMethod() {
+    return payload.methods.find((item) => item.id === selectedMethod);
+  }
+
+  function getResult() {
+    return getSnapshot().methodResults[selectedMethod];
+  }
+
+  function getNode(nodeId) {
+    return payload.dependencyNodes.find((item) => item.id === nodeId);
+  }
+
+  function getConcern() {
+    return (
+      payload.advisorConcerns.find((item) => item.id === selectedConcern) ||
+      payload.advisorConcerns[0]
+    );
+  }
+
+  function makeRunButton(label, controlsId, onRun) {
+    const button = make("button", "run-button");
+    button.type = "button";
+    button.setAttribute("aria-controls", controlsId);
+    const icon = make("span", "run-button__icon", "▶");
+    icon.setAttribute("aria-hidden", "true");
+    const text = make("span", "", label);
+    button.append(icon, text);
+    button.addEventListener("click", () => {
+      onRun();
+      text.textContent = "shown ✓";
+      window.setTimeout(() => {
+        text.textContent = label;
+      }, 850);
+    });
+    return button;
+  }
+
+  function makeCell(prompt, title, id, runButton) {
+    const cell = make("section", "cell");
+    cell.id = id;
+    const rail = make("div", "cell-rail", prompt);
+    rail.setAttribute("aria-hidden", "true");
+    const panel = make("div", "cell-panel");
+    const head = make("header", "cell-head");
+    head.append(make("h2", "cell-title", title));
+    if (runButton) head.append(runButton);
+    panel.append(head);
+    cell.append(rail, panel);
+    return { cell, panel };
+  }
+
+  function makeOutputCell(prompt, id) {
+    const cell = make("section", "output-cell");
+    cell.id = id;
+    const rail = make("div", "cell-rail", prompt);
+    rail.setAttribute("aria-hidden", "true");
+    const panel = make("div", "output-panel");
+    cell.append(rail, panel);
+    return { cell, panel };
+  }
+
+  function renderCodeBlock(title, context, code) {
+    const block = make("div", "code-block");
+    const label = make("div", "code-label");
+    label.append(
+      make("span", "", title),
+      make("span", "code-context", context),
+    );
+    block.append(label, make("pre", "", code));
+    return block;
+  }
+
+  function configureTablist(buttons, selectedId, onSelect) {
+    const selectedIndex = Math.max(
+      0,
+      buttons.findIndex((button) => button.dataset.value === selectedId),
+    );
+    buttons.forEach((button, index) => {
+      const selected = index === selectedIndex;
+      button.setAttribute("aria-selected", String(selected));
+      button.tabIndex = selected ? 0 : -1;
+      button.addEventListener("click", () => onSelect(button.dataset.value));
+      button.addEventListener("keydown", (event) => {
+        let nextIndex;
+        if (event.key === "ArrowRight") {
+          nextIndex = (index + 1) % buttons.length;
+        } else if (event.key === "ArrowLeft") {
+          nextIndex = (index - 1 + buttons.length) % buttons.length;
+        } else if (event.key === "Home") {
+          nextIndex = 0;
+        } else if (event.key === "End") {
+          nextIndex = buttons.length - 1;
+        } else {
+          return;
+        }
+        event.preventDefault();
+        onSelect(buttons[nextIndex].dataset.value);
+        buttons[nextIndex].focus();
+      });
+    });
+  }
+
+  function renderNotebook(data) {
+    payload = data;
+    selectedSnapshot = "s1";
+    selectedMethod = "linkscope";
+    selectedNode = "summary";
+    selectedConcern = "why_not_combine";
+    selectedConcernStep = "";
+    selectedPrior = 0;
+    discoveryCount = 0;
+    refs = {
+      methodButtons: [],
+      snapshotButtons: [],
+      proofButtons: new Map(),
+      concernButtons: new Map(),
+      priorButtons: [],
+      meterUnits: [],
+      discoverySteps: [],
+      renderedConcernId: "",
+    };
+
+    const root = make("div", "notebook-page");
+    const header = make("header", "notebook-header");
+    const headingCopy = make("div");
+    headingCopy.append(
+      make("p", "notebook-path", data.meta.pathLabel),
+      make("h1", "", data.meta.title),
+      make("p", "notebook-subtitle", data.meta.subtitle),
+    );
+    const heading = headingCopy.querySelector("h1");
+    const badge = make("div", "draft-badge", data.meta.status);
+    header.append(headingCopy, badge);
+
+    const workspace = make("div", "workspace");
+    const notebookMain = make("main", "notebook-main");
+    const experiment = renderExperiment(data);
+
+    const definitionOutput = makeOutputCell("Out [1]", "definition-output");
+    const definitionCell = makeCell(
+      "In [1]",
+      data.notebook.cells.find((item) => item.id === "define").title,
+      "definition",
+      makeRunButton("show current result", "definition-output", () => {
+        refs.definitionOutput.focus({ preventScroll: true });
+      }),
+    );
+    const codePair = make("div", "code-pair");
+    refs.implementationBlock = renderCodeBlock("", "", "");
+    refs.implementationTitle =
+      refs.implementationBlock.querySelector(".code-label span");
+    refs.implementationContext =
+      refs.implementationBlock.querySelector(".code-context");
+    refs.implementationCode = refs.implementationBlock.querySelector("pre");
+    codePair.append(
+      renderCodeBlock(
+        data.model.proxy.title,
+        "persistent storage + dynamic entry",
+        data.model.proxy.code,
+      ),
+      refs.implementationBlock,
+    );
+    refs.propertyCode = make("pre", "property-code");
+    refs.propertyCode.append(
+      make("span", "property-symbol", "q"),
+      document.createTextNode(data.model.query.code),
+    );
+    const frameProof = make("div", "frame-proof");
+    frameProof.append(
+      make("code", "", data.model.executionFrame.formula),
+      make("p", "", data.model.executionFrame.proofTransport),
+    );
+    definitionCell.panel.append(codePair, refs.propertyCode, frameProof);
+    refs.definitionOutput = make("div", "output-line");
+    refs.definitionOutput.tabIndex = -1;
+    refs.definitionOutputLabel = make("strong", "output-label");
+    refs.definitionOutputText = make("span");
+    refs.definitionOutput.append(
+      refs.definitionOutputLabel,
+      refs.definitionOutputText,
+    );
+    definitionOutput.panel.append(refs.definitionOutput);
+
+    const verifyCell = makeCell(
+      "In [2]",
+      data.notebook.cells.find((item) => item.id === "compare").title,
+      "verify",
+      makeRunButton("show selected result", "verification-output", () => {
+        updateExperiment();
+        refs.verificationOutput.focus({ preventScroll: true });
+      }),
+    );
+    const methodTabs = make("div", "method-tabs");
+    methodTabs.setAttribute("role", "tablist");
+    methodTabs.setAttribute("aria-label", "Verification design");
+    refs.methodButtons = data.methods.map((method) => {
+      const button = make("button", "method-tab");
+      button.type = "button";
+      button.id = `method-${method.id}`;
+      button.dataset.method = method.id;
+      button.dataset.value = method.id;
+      button.setAttribute("role", "tab");
+      button.setAttribute("aria-controls", "verification-output");
+      button.append(
+        document.createTextNode(method.label),
+        make("span", "", method.short),
+      );
+      methodTabs.append(button);
+      return button;
+    });
+    configureTablist(refs.methodButtons, selectedMethod, selectMethod);
+
+    refs.verificationOutput = make("div", "method-output");
+    refs.verificationOutput.id = "verification-output";
+    refs.verificationOutput.tabIndex = -1;
+    refs.verificationOutput.setAttribute("role", "tabpanel");
+    refs.verificationOutput.setAttribute("aria-live", "polite");
+    refs.verificationOutput.setAttribute("aria-labelledby", "method-linkscope");
+    const resultRow = make("div", "result-row");
+    refs.resultBadge = make("div", "result-badge");
+    refs.resultBadge.dataset.role = "result-badge";
+    const resultCopy = make("div", "result-copy");
+    refs.resultHeadline = make("h3");
+    refs.resultExplanation = make("p");
+    refs.resultExplanation.dataset.role = "method-explanation";
+    resultCopy.append(refs.resultHeadline, refs.resultExplanation);
+    resultRow.append(refs.resultBadge, resultCopy);
+    refs.methodTrace = make("pre", "discovery-console");
+    refs.methodTrace.dataset.role = "method-trace";
+    refs.verificationOutput.append(resultRow, refs.methodTrace);
+    verifyCell.panel.append(methodTabs, refs.verificationOutput);
+
+    const dependencyCell = makeCell(
+      "In [3]",
+      data.notebook.cells.find((item) => item.id === "dependencies").title,
+      "dependencies",
+    );
+    const dependencyBody = make("div", "method-output");
+    const proofGrid = make("div", "proof-grid");
+    proofGrid.setAttribute("aria-label", "Certificate dependency nodes");
+    for (const node of data.dependencyNodes) {
+      const button = make("button", "proof-node", node.shortLabel);
+      button.type = "button";
+      button.dataset.node = node.id;
+      button.setAttribute("aria-pressed", String(node.id === selectedNode));
+      button.addEventListener("click", () => selectNode(node.id, true));
+      proofGrid.append(button);
+      refs.proofButtons.set(node.id, button);
+    }
+    refs.nodeInspector = make("div", "node-inspector");
+    refs.nodeInspector.dataset.role = "proof-inspector";
+    refs.nodeInspector.setAttribute("role", "status");
+    refs.nodeInspector.setAttribute("aria-live", "polite");
+    const legend = make("div", "state-legend");
+    for (const item of data.nodeStatusLegend) {
+      const entry = make("span", "legend-item", item.label);
+      entry.dataset.kind = item.id;
+      legend.append(entry);
+    }
+    dependencyBody.append(proofGrid, refs.nodeInspector, legend);
+    dependencyCell.panel.append(dependencyBody);
+
+    const concernCell = makeCell(
+      "In [4]",
+      data.notebook.cells.find((item) => item.id === "concerns").title,
+      "advisor",
+    );
+    const concernBody = make("div", "concern-body");
+    const concernTabs = make("div", "concern-tabs");
+    for (const concern of data.advisorConcerns) {
+      const button = make("button", "concern-tab", concern.tabLabel);
+      button.type = "button";
+      button.dataset.question = concern.id;
+      button.setAttribute("aria-controls", "advisor-answer");
+      button.setAttribute(
+        "aria-pressed",
+        String(concern.id === selectedConcern),
+      );
+      button.addEventListener("click", () => selectConcern(concern.id, true));
+      concernTabs.append(button);
+      refs.concernButtons.set(concern.id, button);
+    }
+    refs.advisorAnswer = make("div", "advisor-answer");
+    refs.advisorAnswer.id = "advisor-answer";
+    const advisorQuestion = make("div", "advisor-question");
+    advisorQuestion.append(make("p", "advisor-eyebrow", "advisor concern"));
+    refs.concernQuestion = make("h3");
+    refs.concernQuestion.tabIndex = -1;
+    refs.concernShort = make("p");
+    advisorQuestion.append(refs.concernQuestion, refs.concernShort);
+    const advisorResult = make("div", "advisor-result");
+    refs.concernCode = make("code");
+    refs.concernAnswer = make("p");
+    refs.concernBottom = make("p");
+    refs.concernBottom.className = "novelty-warning";
+    refs.concernSteps = make("div", "advisor-controls");
+    advisorResult.append(
+      refs.concernCode,
+      refs.concernAnswer,
+      refs.concernBottom,
+      refs.concernSteps,
+    );
+    refs.advisorAnswer.append(advisorQuestion, advisorResult);
+    concernBody.append(concernTabs, refs.advisorAnswer);
+    concernCell.panel.append(concernBody);
+
+    const discoveryCell = makeCell(
+      "In [5]",
+      data.notebook.cells.find((item) => item.id === "discover").title,
+      "discovery",
+      makeRunButton("show next fact", "discovery-output", () => {
+        revealNextFact();
+        refs.discoveryOutput.focus({ preventScroll: true });
+      }),
+    );
+    const discoveryBody = make("div", "discovery-body");
+    discoveryBody.append(
+      make(
+        "p",
+        "discovery-intro",
+        `${data.onDemand.input} ${data.onDemand.rule}`,
+      ),
+    );
+    refs.discoverySteps = data.onDemand.steps.map((step) => {
+      const item = make("div", "discovery-step", `${step.index}. ${step.label}`);
+      item.dataset.discoveryStep = step.id;
+      item.dataset.visible = "false";
+      item.dataset.current = "false";
+      return item;
+    });
+    const discoverySteps = make("div", "discovery-steps");
+    discoverySteps.append(...refs.discoverySteps);
+    refs.discoveryOutput = make("pre", "discovery-console");
+    refs.discoveryOutput.id = "discovery-output";
+    refs.discoveryOutput.dataset.role = "discovery-output";
+    refs.discoveryOutput.tabIndex = -1;
+    refs.discoveryOutput.setAttribute("role", "status");
+    refs.discoveryOutput.setAttribute("aria-live", "polite");
+    const discoveryControls = make("div", "discovery-controls");
+    refs.nextFactButton = make("button", "run-button", "show next fact");
+    refs.nextFactButton.type = "button";
+    refs.nextFactButton.addEventListener("click", revealNextFact);
+    refs.resetFactsButton = make("button", "secondary-button", "reset");
+    refs.resetFactsButton.type = "button";
+    refs.resetFactsButton.addEventListener("click", resetDiscovery);
+    discoveryControls.append(refs.nextFactButton, refs.resetFactsButton);
+    discoveryBody.append(
+      discoverySteps,
+      refs.discoveryOutput,
+      discoveryControls,
+    );
+    discoveryCell.panel.append(discoveryBody);
+
+    const formalCell = makeCell(
+      "In [6]",
+      data.notebook.cells.find((item) => item.id === "formal").title,
+      "formal",
+    );
+    const formalBody = make("div", "formal-body");
+    formalBody.id = "novelty";
+    const claimGrid = make("div", "claim-grid");
+    for (const theorem of data.formalCore.theorems) {
+      const card = make("section", "claim-card");
+      card.append(
+        make("p", "claim-label", theorem.title),
+        make("pre", "formula-code", theorem.statement),
+        make("p", "", theorem.meaning),
+      );
+      if (Array.isArray(theorem.assumptions)) {
+        card.append(
+          make(
+            "p",
+            "",
+            `Assumptions: ${theorem.assumptions.join("; ")}.`,
+          ),
+        );
+      }
+      claimGrid.append(card);
+    }
+    const noveltyWarning = make(
+      "div",
+      "novelty-warning",
+      `${data.noveltyBoundary.candidateContribution} Risk: ${data.noveltyBoundary.reviewerRisk} Hard part: ${data.formalCore.hardPart}`,
+    );
+
+    const priorTabs = make("div", "prior-tabs");
+    priorTabs.setAttribute("role", "tablist");
+    priorTabs.setAttribute("aria-label", "Closest previous work");
+    refs.priorButtons = data.priorWork.map((item, index) => {
+      const button = make("button", "prior-tab", item.name);
+      button.type = "button";
+      button.dataset.prior = String(index);
+      button.dataset.value = String(index);
+      button.setAttribute("role", "tab");
+      button.setAttribute("aria-controls", "prior-output");
+      priorTabs.append(button);
+      return button;
+    });
+    configureTablist(refs.priorButtons, "0", (value) => {
+      selectedPrior = Number(value);
+      updatePriorWork();
+    });
+    refs.priorOutput = make("div", "prior-result");
+    refs.priorOutput.id = "prior-output";
+    refs.priorOutput.setAttribute("role", "tabpanel");
+    const priorCovered = make("div", "prior-card");
+    priorCovered.dataset.kind = "covered";
+    priorCovered.append(make("strong", "", "already covers"));
+    refs.priorCoveredText = make("p");
+    priorCovered.append(refs.priorCoveredText);
+    const priorMissing = make("div", "prior-card");
+    priorMissing.dataset.kind = "missing";
+    priorMissing.append(make("strong", "", "candidate boundary to test"));
+    refs.priorMissingText = make("p");
+    refs.priorLinkSlot = make("div");
+    priorMissing.append(refs.priorMissingText, refs.priorLinkSlot);
+    refs.priorOutput.append(priorCovered, priorMissing);
+
+    formalBody.append(
+      claimGrid,
+      noveltyWarning,
+      make("p", "advisor-eyebrow", "closest work — click to compare"),
+      priorTabs,
+      refs.priorOutput,
+    );
+    formalCell.panel.append(formalBody);
+
+    notebookMain.append(
+      definitionCell.cell,
+      definitionOutput.cell,
+      verifyCell.cell,
+      dependencyCell.cell,
+      concernCell.cell,
+      discoveryCell.cell,
+      formalCell.cell,
+    );
+
+    workspace.append(notebookMain, experiment);
+    const footer = make("footer", "notebook-footer");
+    footer.append(
+      make("p", "", data.meta.footer),
+      makeLink(data.meta.homeLabel, "/", ""),
+    );
+    root.append(header, workspace, footer);
+
+    refs.heading = heading;
+    updateAll();
+    return root;
+  }
+
+  function renderExperiment(data) {
+    const aside = make("aside", "experiment");
+    aside.setAttribute("aria-label", "Synchronized upgrade experiment");
+    const head = make("header", "experiment-head");
+    head.append(
+      make("h2", "", "Upgrade experiment"),
+      make("p", "", data.notebook.instructions),
+    );
+    const tabs = make("div", "snapshot-tabs");
+    tabs.setAttribute("role", "tablist");
+    tabs.setAttribute("aria-label", "Immutable snapshot");
+    refs.snapshotButtons = data.snapshots.map((snapshot) => {
+      const button = make("button", "snapshot-tab");
+      button.type = "button";
+      button.id = `snapshot-${snapshot.id}`;
+      button.dataset.snapshot = snapshot.id;
+      button.dataset.value = snapshot.id;
+      button.setAttribute("role", "tab");
+      button.setAttribute("aria-controls", "verification-output");
+      const [main, ...rest] = snapshot.tabLabel.split(" · ");
+      button.append(
+        document.createTextNode(main),
+        make("span", "", rest.join(" · ")),
+      );
+      tabs.append(button);
+      return button;
+    });
+    configureTablist(refs.snapshotButtons, selectedSnapshot, selectSnapshot);
+
+    const diff = make("div", "implementation-diff");
+    refs.diffTitle = make("p", "diff-title");
+    refs.diffLines = make("div", "diff-lines");
+    refs.diffLines.dataset.role = "diff-code";
+    diff.append(refs.diffTitle, refs.diffLines);
+
+    const meter = make("div", "work-meter");
+    const meterHead = make("div", "meter-head");
+    refs.meterLabel = make("span");
+    refs.meterValue = make("strong");
+    const counts = make("span");
+    refs.reuseCount = make("span");
+    refs.reuseCount.dataset.role = "reuse-count";
+    refs.checkCount = make("span");
+    refs.checkCount.dataset.role = "check-count";
+    counts.append(refs.reuseCount, document.createTextNode(" · "), refs.checkCount);
+    meterHead.append(refs.meterLabel, refs.meterValue);
+    const units = make("div", "meter-units");
+    for (let index = 0; index < 8; index += 1) {
+      const unit = make("span", "meter-unit");
+      units.append(unit);
+      refs.meterUnits.push(unit);
+    }
+    meter.append(meterHead, counts, units);
+    refs.workDisclaimer = make(
+      "p",
+      "work-disclaimer",
+      data.workAccounting.disclaimer,
+    );
+    meter.append(refs.workDisclaimer);
+
+    refs.counterexample = make("div", "counterexample");
+    refs.counterexample.dataset.role = "counterexample";
+    refs.counterexample.hidden = true;
+    const takeaway = make("div", "experiment-takeaway");
+    takeaway.append(make("strong", "", "current explanation"));
+    refs.takeaway = make("p");
+    takeaway.append(refs.takeaway);
+    aside.append(head, tabs, diff, meter, refs.counterexample, takeaway);
+    return aside;
+  }
+
+  function selectSnapshot(id) {
+    if (!snapshotIds.includes(id)) return;
+    selectedSnapshot = id;
+    selectedConcernStep = "";
+    discoveryCount = 0;
+    updateAll();
+  }
+
+  function selectMethod(id) {
+    if (!methodIds.includes(id)) return;
+    selectedMethod = id;
+    selectedConcernStep = "";
+    updateAll();
+  }
+
+  function selectNode(id, announce = false) {
+    if (!getNode(id)) return;
+    selectedNode = id;
+    if (announce) selectedConcernStep = "";
+    updateProofNodes();
+    updateConcernStepStates();
+    if (announce) refs.nodeInspector.focus?.({ preventScroll: true });
+  }
+
+  function updateAll() {
+    updateTabStates();
+    updateDefinition();
+    updateExperiment();
+    updateProofNodes();
+    updateConcern(false);
+    updateDiscovery();
+    updatePriorWork();
+  }
+
+  function updateTabStates() {
+    refs.snapshotButtons.forEach((button) => {
+      const active = button.dataset.snapshot === selectedSnapshot;
+      button.setAttribute("aria-selected", String(active));
+      button.tabIndex = active ? 0 : -1;
+    });
+    refs.methodButtons.forEach((button) => {
+      const active = button.dataset.method === selectedMethod;
+      button.setAttribute("aria-selected", String(active));
+      button.tabIndex = active ? 0 : -1;
+    });
+    refs.verificationOutput.setAttribute(
+      "aria-labelledby",
+      `method-${selectedMethod}`,
+    );
+  }
+
+  function updateDefinition() {
+    const snapshot = getSnapshot();
+    const reference = snapshot.referenceOutcome;
+    refs.implementationTitle.textContent = snapshot.codeTitle;
+    refs.implementationContext.textContent = snapshot.title;
+    refs.implementationCode.textContent = snapshot.code;
+    refs.definitionOutput.dataset.tone =
+      reference.verdict === "refuted" ? "danger" : "success";
+    refs.definitionOutputLabel.textContent = reference.label;
+    refs.definitionOutputText.textContent = reference.reason;
+  }
+
+  function updateExperiment() {
+    const snapshot = getSnapshot();
+    const method = getMethod();
+    const result = getResult();
+
+    refs.resultBadge.textContent = result.badge;
+    refs.resultBadge.dataset.tone = result.tone;
+    refs.resultHeadline.textContent = result.headline;
+    refs.resultExplanation.textContent = result.explanation;
+    refs.methodTrace.textContent = result.trace
+      .map((line, index) => `${index + 1}. ${line}`)
+      .join("\n");
+
+    refs.diffTitle.textContent = `${snapshot.diffTitle} · implementation diff`;
+    refs.diffLines.replaceChildren();
+    for (const lineText of snapshot.diff.split("\n")) {
+      const trimmed = lineText.trimStart();
+      const kind = trimmed.startsWith("+")
+        ? "add"
+        : trimmed.startsWith("-")
+          ? "remove"
+          : trimmed.startsWith("#")
+            ? "warning"
+            : "context";
+      const line = make("p", "diff-line", lineText);
+      line.dataset.kind = kind;
+      refs.diffLines.append(line);
+    }
+
+    const work = result.work;
+    refs.meterLabel.textContent = `${method.label} at ${snapshot.id.toUpperCase()}`;
+    refs.meterValue.textContent =
+      work.unjustifiedReuse > 0
+        ? `${work.unjustifiedReuse} unjustified`
+        : `${work.reused} reuse / ${work.checkedOrRebuilt} check`;
+    refs.reuseCount.textContent = `safe reuse ${work.reused}`;
+    refs.checkCount.textContent = `checked ${work.checkedOrRebuilt}`;
+
+    payload.dependencyNodes.forEach((node, index) => {
+      refs.meterUnits[index].dataset.state = result.nodeStates[node.id];
+    });
+
+    if (result.counterexample) {
+      refs.counterexample.hidden = false;
+      refs.counterexample.textContent = result.counterexample;
+    } else {
+      refs.counterexample.hidden = true;
+      refs.counterexample.textContent = "";
+    }
+    refs.takeaway.textContent = `${snapshot.relevantChange} ${result.headline}`;
+  }
+
+  function updateProofNodes() {
+    const result = getResult();
+    const legendById = new Map(
+      payload.nodeStatusLegend.map((item) => [item.id, item]),
+    );
+    for (const node of payload.dependencyNodes) {
+      const state = result.nodeStates[node.id];
+      const button = refs.proofButtons.get(node.id);
+      button.dataset.state = state;
+      button.setAttribute("aria-pressed", String(node.id === selectedNode));
+      const stateLabel = legendById.get(state)?.label || state;
+      button.setAttribute(
+        "aria-label",
+        `${node.label}: ${stateLabel}. Activate for explanation.`,
+      );
+    }
+    const node = getNode(selectedNode);
+    const state = result.nodeStates[selectedNode];
+    const meaning = legendById.get(state)?.meaning || state;
+    const override = result.nodeReasonOverrides?.[selectedNode];
+    refs.nodeInspector.textContent = `${node.label} · ${state}. ${
+      override || node.description
+    } ${meaning} Key: ${node.key}`;
+  }
+
+  function concernSteps() {
+    return getConcern().demoSteps;
+  }
+
+  function selectConcern(id, applyFirstDemo) {
+    if (!payload.advisorConcerns.some((item) => item.id === id)) return;
+    selectedConcern = id;
+    selectedConcernStep = "";
+    for (const [concernId, button] of refs.concernButtons) {
+      button.setAttribute("aria-pressed", String(concernId === id));
+    }
+    updateConcern(applyFirstDemo);
+    refs.concernQuestion.focus({ preventScroll: true });
+  }
+
+  function concernStepKey(step) {
+    return `${step.snapshot}:${step.method}:${step.node}:${step.label}`;
+  }
+
+  function updateConcernStepStates() {
+    if (!refs.concernSteps) return;
+    for (const button of refs.concernSteps.querySelectorAll(
+      "[data-concern-step]",
+    )) {
+      const active = button.dataset.concernStep === selectedConcernStep;
+      button.setAttribute("aria-pressed", String(active));
+      button.dataset.active = String(active);
+    }
+  }
+
+  function scrollConcernEvidence() {
+    if (!window.matchMedia?.("(max-width: 1080px)").matches) return;
+    const target =
+      selectedConcern === "on_demand"
+        ? refs.discoveryOutput
+        : refs.verificationOutput;
+    target.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+
+  function applyConcernStep(step, scrollEvidence = true) {
+    selectedConcernStep = concernStepKey(step);
+    selectedSnapshot = step.snapshot;
+    selectedMethod = step.method;
+    selectedNode = step.node;
+    discoveryCount = 0;
+    updateAll();
+    if (scrollEvidence) scrollConcernEvidence();
+  }
+
+  function updateConcern(applyFirstDemo) {
+    const concern = getConcern();
+    refs.concernQuestion.textContent = concern.question;
+    refs.concernShort.textContent = concern.shortAnswer;
+    refs.concernCode.textContent = concern.code;
+    refs.concernAnswer.textContent = concern.answer;
+    refs.concernBottom.textContent = concern.bottomLine;
+    const steps = concernSteps();
+    if (refs.renderedConcernId !== concern.id) {
+      refs.concernSteps.replaceChildren();
+      for (const step of steps) {
+        const button = make("button", "secondary-button", step.label);
+        button.type = "button";
+        button.dataset.concernStep = concernStepKey(step);
+        button.setAttribute("aria-pressed", "false");
+        button.addEventListener("click", () => applyConcernStep(step));
+        refs.concernSteps.append(button);
+      }
+      refs.renderedConcernId = concern.id;
+    }
+    updateConcernStepStates();
+    if (applyFirstDemo && steps[0]) applyConcernStep(steps[0], false);
+  }
+
+  function revealNextFact() {
+    if (discoveryCount < payload.onDemand.steps.length) {
+      discoveryCount += 1;
+      updateDiscovery();
+    }
+  }
+
+  function resetDiscovery() {
+    discoveryCount = 0;
+    updateDiscovery();
+  }
+
+  function demandStepForSnapshot(step, snapshotId) {
+    const override = step.snapshotOverrides?.[snapshotId];
+    return override ? { ...step, ...override } : step;
+  }
+
+  function updateDiscovery() {
+    const steps = payload.onDemand.steps;
+    const resolvedSteps = steps.map((step) =>
+      demandStepForSnapshot(step, selectedSnapshot),
+    );
+    refs.discoverySteps.forEach((element, index) => {
+      element.textContent = `${resolvedSteps[index].index}. ${resolvedSteps[index].label}`;
+      element.dataset.visible = String(index < discoveryCount);
+      element.dataset.current = String(index === discoveryCount - 1);
+    });
+    refs.nextFactButton.disabled = discoveryCount >= steps.length;
+    refs.resetFactsButton.disabled = discoveryCount === 0;
+
+    const snapshot = getSnapshot();
+    const lines = [
+      `query> prove(${snapshot.id.toUpperCase()}, P, q_limit)`,
+      `facts checked: ${discoveryCount}/${steps.length}`,
+    ];
+    if (discoveryCount === 0) {
+      lines.push("status: unknown · no dynamic facts acquired yet");
+    }
+    for (const step of resolvedSteps.slice(0, discoveryCount)) {
+      lines.push(
+        "",
+        `[${step.index}] ${step.label}`,
+        `fact: ${step.fact}`,
+        `evidence: ${step.evidence}`,
+      );
+      if (
+        selectedSnapshot === "s1" &&
+        step.revealsAtS1 &&
+        !step.snapshotOverrides?.s1
+      ) {
+        lines.push(`S1: ${step.revealsAtS1}`);
+      }
+      if (step.note) {
+        lines.push(`${snapshot.id.toUpperCase()}: ${step.note}`);
+      } else if (
+        step.id === "need_slice" &&
+        selectedSnapshot !== "s1" &&
+        !step.snapshotOverrides?.[selectedSnapshot]
+      ) {
+        lines.push(`${snapshot.id.toUpperCase()}: ${snapshot.relevantChange}`);
+      }
+    }
+    if (discoveryCount === steps.length) {
+      lines.push(
+        "",
+        `outcome: ${snapshot.referenceOutcome.verdict}`,
+        snapshot.referenceOutcome.reason,
+      );
+    } else {
+      lines.push("", `next demand: ${resolvedSteps[discoveryCount].fact}`);
+    }
+    refs.discoveryOutput.textContent = lines.join("\n");
+  }
+
+  function updatePriorWork() {
+    const item = payload.priorWork[selectedPrior] || payload.priorWork[0];
+    refs.priorButtons.forEach((button, index) => {
+      const active = index === selectedPrior;
+      button.setAttribute("aria-selected", String(active));
+      button.tabIndex = active ? 0 : -1;
+    });
+    refs.priorCoveredText.textContent = item.alreadyHas;
+    refs.priorMissingText.textContent = item.boundaryToTest;
+    refs.priorLinkSlot.replaceChildren(
+      makeLink(`open ${item.name}`, item.url, "prior-link"),
+    );
+  }
+
+  let framed = true;
+  try {
+    framed = window.top !== window.self;
+  } catch {
+    framed = true;
+  }
+  if (framed) {
+    phraseInput.value = "";
+    phraseInput.disabled = true;
+    revealButton.disabled = true;
+    submitButton.disabled = true;
+    form.setAttribute("aria-disabled", "true");
+    showGateStatus(
+      "Best-effort framing check: open this private draft directly in a new tab to unlock it.",
+      "error",
+    );
+    return;
+  }
+
   revealButton.addEventListener("click", () => {
-    const revealing = phraseInput.type === "password";
-    phraseInput.type = revealing ? "text" : "password";
-    revealButton.textContent = revealing ? "Hide" : "Show";
-    revealButton.setAttribute("aria-pressed", String(revealing));
+    const reveal = phraseInput.type === "password";
+    phraseInput.type = reveal ? "text" : "password";
+    revealButton.textContent = reveal ? "Hide" : "Show";
+    revealButton.setAttribute("aria-pressed", String(reveal));
     revealButton.setAttribute(
       "aria-label",
-      revealing ? "Hide access phrase" : "Show access phrase",
+      reveal ? "Hide access phrase" : "Show access phrase",
     );
     phraseInput.focus();
   });
@@ -229,38 +1499,33 @@
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!window.crypto?.subtle) {
-      showStatus(
-        "This browser cannot decrypt the draft. Please use a current browser over HTTPS.",
+      showGateStatus(
+        "This browser cannot decrypt the draft. Use a current browser over HTTPS.",
         "error",
       );
       return;
     }
-
     setBusy(true);
-    showStatus("Deriving a local decryption key…");
-
+    showGateStatus("Deriving a local decryption key…");
     try {
-      envelopePromise ||= loadEnvelope();
-      const envelope = await envelopePromise;
+      const envelope = await getEnvelope();
       const plaintext = await decrypt(envelope, phraseInput.value);
       const candidate = validatePayload(JSON.parse(plaintext));
+      const rendered = renderNotebook(candidate);
       phraseInput.value = "";
-      payload = candidate;
-      renderResearch(candidate);
+      app.replaceChildren(rendered);
       gate.hidden = true;
       app.hidden = false;
       document.title = candidate.meta.pageTitle;
       window.scrollTo({ top: 0, behavior: "instant" });
-      const title = app.querySelector("h1");
-      title.tabIndex = -1;
-      title.focus({ preventScroll: true });
+      refs.heading.tabIndex = -1;
+      refs.heading.focus({ preventScroll: true });
     } catch (error) {
       console.error("Research draft unlock failed", error);
+      app.replaceChildren();
+      app.hidden = true;
       phraseInput.value = "";
-      showStatus(
-        "Could not unlock. Check the phrase and try again.",
-        "error",
-      );
+      showGateStatus("Could not unlock. Check the phrase and try again.", "error");
       phraseInput.focus();
       phraseInput.select();
     } finally {
@@ -268,585 +1533,13 @@
     }
   });
 
-  function renderResearch(data) {
+  window.addEventListener("pagehide", () => {
+    payload = undefined;
+    refs = {};
     app.replaceChildren();
-    app.className = "research-shell";
-
-    const nav = renderNavigation(data.nav, data.meta.shortTitle);
-    const hero = renderHero(data.meta);
-    app.append(nav, hero);
-
-    for (const section of data.sections) {
-      app.append(renderSection(section));
-    }
-
-    app.append(renderFooter(data.meta));
-    initializeNavigationObserver();
-    updateScenario(data.scenarios[0].id);
-  }
-
-  function renderNavigation(items, shortTitle) {
-    const nav = make("nav", "research-nav");
-    nav.setAttribute("aria-label", "Research draft sections");
-    const inner = make("div", "research-nav__inner");
-    const brand = link(shortTitle, "#top", "research-brand");
-    brand.removeAttribute("target");
-    brand.removeAttribute("rel");
-    brand.href = "#top";
-    brand.prepend(make("span", "research-brand__mark"));
-
-    const links = make("div", "nav-links");
-    for (const item of items) {
-      const anchor = make("a", "", item.label);
-      anchor.href = `#${item.id}`;
-      anchor.dataset.sectionLink = item.id;
-      links.append(anchor);
-    }
-
-    inner.append(brand, links);
-    nav.append(inner);
-    return nav;
-  }
-
-  function renderHero(meta) {
-    const hero = make("header", "hero");
-    hero.id = "top";
-    const inner = make("div", "hero__inner");
-    const main = make("div", "hero__main");
-    main.append(make("p", "eyebrow", meta.status));
-    const heading = make("h1", "", meta.title);
-    heading.append(make("span", "", meta.subtitle));
-    main.append(heading, make("p", "hero__lede", meta.pitch));
-
-    const actions = make("div", "hero-actions");
-    const copyButton = make("button", "action-button", "Copy 45-second pitch");
-    copyButton.type = "button";
-    copyButton.dataset.action = "copy-pitch";
-    copyButton.addEventListener("click", () => copyText(meta.copyPitch));
-
-    const printButton = make(
-      "button",
-      "action-button action-button--secondary",
-      "Print / save PDF",
-    );
-    printButton.type = "button";
-    printButton.addEventListener("click", () => window.print());
-    actions.append(copyButton, printButton);
-    main.append(actions);
-
-    const aside = make("aside", "hero__aside");
-    aside.append(
-      make("p", "hero__aside-label", meta.questionLabel),
-      make("p", "", meta.question),
-    );
-
-    inner.append(main, aside);
-    hero.append(inner);
-    return hero;
-  }
-
-  function renderSection(section) {
-    if (!isPlainObject(section)) throw new Error("Invalid section");
-    const container = make("section", "content-section");
-    container.id = requireString(section.id, "section id");
-    const inner = make("div", "content-section__inner");
-    inner.append(renderSectionHeading(section));
-
-    for (const block of requireArray(section.blocks, "section blocks")) {
-      inner.append(renderBlock(block));
-    }
-
-    container.append(inner);
-    return container;
-  }
-
-  function renderSectionHeading(section) {
-    const heading = make("div", "section-heading");
-    heading.append(make("div", "section-index", section.index));
-    const copy = make("div");
-    copy.append(make("h2", "", section.title));
-    if (section.lead) copy.append(make("p", "", section.lead));
-    heading.append(copy);
-    return heading;
-  }
-
-  function renderBlock(block) {
-    if (!isPlainObject(block)) throw new Error("Invalid content block");
-    switch (block.type) {
-      case "cards":
-        return renderCards(block);
-      case "workbench":
-        return renderWorkbench(block);
-      case "baseline":
-        return renderBaseline(block);
-      case "callout":
-        return renderCallout(block);
-      case "theorems":
-        return renderTheorems(block);
-      case "snapshot":
-        return renderSnapshot(block);
-      case "priorTable":
-        return renderPriorTable(block);
-      case "evaluation":
-        return renderEvaluation(block);
-      case "discussion":
-        return renderDiscussion(block);
-      case "sources":
-        return renderSources(block);
-      default:
-        throw new Error("Unsupported content block");
-    }
-  }
-
-  function renderCards(block) {
-    const grid = make("div", "problem-grid");
-    for (const [index, item] of block.items.entries()) {
-      const card = make("article", "problem-card");
-      card.append(
-        make("span", "card-number", String(index + 1).padStart(2, "0")),
-        make("h3", "", item.title),
-        make("p", "", item.text),
-      );
-      grid.append(card);
-    }
-    return grid;
-  }
-
-  function renderWorkbench(block) {
-    const wrapper = make("div");
-    const definitions = make("div", "definition-strip");
-    for (const item of block.definitions) {
-      const definition = make("div", "definition-item");
-      definition.append(make("code", "", item.symbol), make("span", "", item.text));
-      definitions.append(definition);
-    }
-
-    const workbench = make("div", "workbench");
-    const bar = make("div", "workbench__bar");
-    const lights = make("div", "workbench__lights");
-    lights.setAttribute("aria-hidden", "true");
-    lights.append(make("span"), make("span"), make("span"));
-    bar.append(make("span", "", block.title), lights);
-
-    const tabs = make("div", "scenario-tabs");
-    tabs.setAttribute("role", "tablist");
-    tabs.setAttribute("aria-label", "Choose a deployed snapshot");
-    scenarioButtons = payload.scenarios.map((scenario) => {
-      const button = make("button", "scenario-tab");
-      button.type = "button";
-      button.setAttribute("role", "tab");
-      button.dataset.scenario = scenario.id;
-      button.append(
-        make("strong", "", scenario.label),
-        make("span", "", scenario.shortDescription),
-      );
-      button.addEventListener("click", () => updateScenario(scenario.id));
-      tabs.append(button);
-      return button;
-    });
-
-    const body = make("div", "workbench__body");
-    const codeStage = make("div", "code-stage");
-    codeStage.append(make("p", "panel-label", block.codeLabel));
-    const codeGrid = make("div", "code-grid");
-    codeGrid.append(
-      renderCodeCard(block.proxyTitle, block.proxyCode, "proxy-code"),
-      renderCodeCard("", "", "implementation-code"),
-    );
-    codeStage.append(codeGrid);
-
-    const propertyStage = make("div", "property-stage");
-    propertyStage.append(
-      make("p", "panel-label", block.propertyLabel),
-      make("div", "property-expression", block.property),
-    );
-    const result = make("div", "property-result");
-    const badge = make("span", "result-badge");
-    badge.dataset.role = "result-badge";
-    const title = make("h3");
-    title.dataset.role = "result-title";
-    const explanation = make("p");
-    explanation.dataset.role = "result-text";
-    const counterexample = make("div", "counterexample");
-    counterexample.dataset.role = "counterexample";
-    result.append(badge, title, explanation, counterexample);
-    propertyStage.append(result);
-    body.append(codeStage, propertyStage);
-
-    const proofSection = make("div", "proof-section");
-    const proofHeader = make("div", "proof-section__header");
-    const proofCopy = make("div");
-    proofCopy.append(
-      make("p", "panel-label", block.proofLabel),
-      make("h3", "", block.proofTitle),
-    );
-    proofHeader.append(proofCopy, renderLegend(block.legend));
-    proofSection.append(proofHeader);
-
-    const flow = make("div", "proof-flow");
-    for (const proofNode of payload.proofNodes) {
-      const button = make("button", "proof-node");
-      button.type = "button";
-      button.dataset.node = proofNode.id;
-      button.setAttribute("aria-pressed", "false");
-      button.append(
-        make("span", "proof-node__state"),
-        make("strong", "", proofNode.label),
-      );
-      button.addEventListener("click", () => inspectProofNode(proofNode.id));
-      flow.append(button);
-    }
-    const inspector = make("div", "proof-inspector");
-    inspector.dataset.role = "proof-inspector";
-    inspector.setAttribute("role", "status");
-    proofSection.append(flow, inspector);
-
-    workbench.append(bar, tabs, body, proofSection);
-    wrapper.append(definitions, workbench);
-    return wrapper;
-  }
-
-  function renderCodeCard(title, code, role) {
-    const card = make("article", "code-card");
-    const heading = make("div", "code-card__title");
-    const titleNode = make("span", "", title);
-    if (role === "implementation-code") {
-      titleNode.dataset.role = "implementation-title";
-    }
-    heading.append(titleNode, make("span", "", role === "proxy-code" ? "stable" : "dynamic"));
-    const pre = make("pre", "", code);
-    pre.dataset.role = role;
-    card.append(heading, pre);
-    return card;
-  }
-
-  function renderLegend(items) {
-    const legend = make("div", "proof-legend");
-    for (const item of items) {
-      const entry = make("span");
-      entry.append(make("i", `legend-${item.state}`), document.createTextNode(item.label));
-      legend.append(entry);
-    }
-    return legend;
-  }
-
-  function renderBaseline(block) {
-    const workbench = make("div", "workbench");
-    const bar = make("div", "workbench__bar");
-    bar.append(make("span", "", block.title), make("span", "", block.note));
-    const tabs = make("div", "baseline-tabs");
-    tabs.setAttribute("role", "tablist");
-    tabs.setAttribute("aria-label", "Choose a verification strategy");
-    baselineButtons = payload.baselines.map((baseline) => {
-      const button = make("button", "baseline-tab");
-      button.type = "button";
-      button.setAttribute("role", "tab");
-      button.dataset.baseline = baseline.id;
-      button.append(
-        make("strong", "", baseline.label),
-        make("span", "", baseline.shortDescription),
-      );
-      button.addEventListener("click", () => updateBaseline(baseline.id));
-      tabs.append(button);
-      return button;
-    });
-
-    const panel = make("div", "baseline-panel");
-    const metric = make("div", "baseline-metric");
-    const value = make("span", "metric-value");
-    value.dataset.role = "baseline-value";
-    const metricLabel = make("span", "metric-label");
-    metricLabel.dataset.role = "baseline-metric-label";
-    metric.append(value, metricLabel);
-
-    const explanation = make("div", "baseline-explanation");
-    const badge = make("span", "result-badge");
-    badge.dataset.role = "baseline-badge";
-    const title = make("h3");
-    title.dataset.role = "baseline-title";
-    const text = make("p");
-    text.dataset.role = "baseline-text";
-    explanation.append(badge, title, text);
-    panel.append(metric, explanation);
-    workbench.append(bar, tabs, panel);
-
-    const wrapper = make("div");
-    wrapper.append(workbench, make("p", "baseline-note", block.disclaimer));
-    return wrapper;
-  }
-
-  function renderCallout(block) {
-    const callout = make("div", "callout");
-    callout.append(
-      make("div", "callout__label", block.label),
-      make("blockquote", "", block.text),
-    );
-    return callout;
-  }
-
-  function renderTheorems(block) {
-    const grid = make("div", "theorem-grid");
-    for (const [index, item] of block.items.entries()) {
-      const card = make("article", "theorem-card");
-      card.append(
-        make("span", "card-number", `T${index + 1}`),
-        make("h3", "", item.title),
-        make("p", "", item.text),
-        make("div", "equation", item.formula),
-      );
-      grid.append(card);
-    }
-    return grid;
-  }
-
-  function renderSnapshot(block) {
-    const layout = make("div", "snapshot-layout");
-    layout.append(make("pre", "snapshot-code", block.code));
-    const points = make("div", "snapshot-points");
-    for (const item of block.points) {
-      const point = make("article", "snapshot-point");
-      point.append(make("strong", "", item.title), make("p", "", item.text));
-      points.append(point);
-    }
-    layout.append(points);
-    return layout;
-  }
-
-  function renderPriorTable(block) {
-    const wrapper = make("div");
-    const tableWrapper = make("div", "prior-table-wrap");
-    const table = make("table", "prior-table");
-    const head = make("thead");
-    const headRow = make("tr");
-    for (const heading of block.headings) {
-      headRow.append(make("th", "", heading));
-    }
-    head.append(headRow);
-
-    const body = make("tbody");
-    for (const row of block.rows) {
-      const tr = make("tr");
-      const nameCell = make("td");
-      if (row.url) {
-        nameCell.append(link(row.name, row.url));
-      } else {
-        nameCell.textContent = row.name;
-      }
-      tr.append(
-        nameCell,
-        make("td", "", row.covers),
-        make("td", "", row.gap),
-      );
-      body.append(tr);
-    }
-
-    table.append(head, body);
-    tableWrapper.append(table);
-    wrapper.append(
-      tableWrapper,
-      make("div", "novelty-warning", block.warning),
-    );
-    return wrapper;
-  }
-
-  function renderEvaluation(block) {
-    const grid = make("div", "evaluation-grid");
-    for (const [index, item] of block.items.entries()) {
-      const card = make("article", "evaluation-card");
-      card.append(
-        make("span", "card-number", String(index + 1).padStart(2, "0")),
-        make("h3", "", item.title),
-        make("p", "", item.text),
-      );
-      const list = make("ul");
-      for (const point of item.points) {
-        list.append(make("li", "", point));
-      }
-      card.append(list);
-      grid.append(card);
-    }
-    return grid;
-  }
-
-  function renderDiscussion(block) {
-    const box = make("div", "discussion-box");
-    box.append(make("h3", "", block.title));
-    const list = make("div", "discussion-list");
-    for (const question of block.questions) {
-      list.append(make("div", "discussion-question", question));
-    }
-    box.append(list);
-    return box;
-  }
-
-  function renderSources(block) {
-    const list = make("ul", "sources-list");
-    for (const source of block.items) {
-      const item = make("li");
-      item.append(link(source.label, source.url));
-      list.append(item);
-    }
-    return list;
-  }
-
-  function renderFooter(meta) {
-    const footer = make("footer", "research-footer");
-    const inner = make("div", "research-footer__inner");
-    const copy = make("div");
-    copy.append(
-      make("p", "", meta.footerLine1),
-      make("p", "", meta.footerLine2),
-    );
-    inner.append(copy, link(meta.homeLabel, "/", ""));
-    footer.append(inner);
-    return footer;
-  }
-
-  function updateScenario(id) {
-    const scenario = payload.scenarios.find((item) => item.id === id);
-    if (!scenario) return;
-    selectedScenario = id;
-
-    for (const button of scenarioButtons) {
-      const active = button.dataset.scenario === id;
-      button.setAttribute("aria-selected", String(active));
-      button.tabIndex = active ? 0 : -1;
-    }
-
-    app.querySelector('[data-role="implementation-title"]').textContent =
-      scenario.implementationTitle;
-    app.querySelector('[data-role="implementation-code"]').textContent =
-      scenario.implementationCode;
-
-    const resultBadge = app.querySelector('[data-role="result-badge"]');
-    resultBadge.dataset.result = scenario.result;
-    resultBadge.textContent = scenario.resultLabel;
-    app.querySelector('[data-role="result-title"]').textContent =
-      scenario.resultTitle;
-    app.querySelector('[data-role="result-text"]').textContent =
-      scenario.resultText;
-
-    const counterexample = app.querySelector('[data-role="counterexample"]');
-    counterexample.textContent = scenario.counterexample || "";
-    counterexample.hidden = !scenario.counterexample;
-
-    for (const proofNode of payload.proofNodes) {
-      const element = app.querySelector(`[data-node="${proofNode.id}"]`);
-      const nodeState = scenario.nodeStates[proofNode.id];
-      if (!["reused", "rechecked", "recomputed", "invalidated"].includes(nodeState)) {
-        throw new Error("Invalid proof node state");
-      }
-      element.dataset.state = nodeState;
-      element.querySelector(".proof-node__state").textContent = nodeState;
-      element.setAttribute(
-        "aria-label",
-        `${proofNode.label}: ${nodeState}. Activate for explanation.`,
-      );
-      element.setAttribute("aria-pressed", "false");
-    }
-
-    const firstNode = payload.proofNodes[0];
-    inspectProofNode(firstNode.id);
-    updateBaseline(selectedBaseline);
-  }
-
-  function inspectProofNode(id) {
-    const scenario = payload.scenarios.find(
-      (item) => item.id === selectedScenario,
-    );
-    const proofNode = payload.proofNodes.find((item) => item.id === id);
-    if (!scenario || !proofNode) return;
-
-    for (const element of app.querySelectorAll(".proof-node")) {
-      element.setAttribute("aria-pressed", String(element.dataset.node === id));
-    }
-    const reason = scenario.nodeReasons[id] || proofNode.description;
-    app.querySelector('[data-role="proof-inspector"]').textContent =
-      `${proofNode.label}: ${reason}`;
-  }
-
-  function updateBaseline(id) {
-    const baseline = payload.baselines.find((item) => item.id === id);
-    const scenario = payload.scenarios.find(
-      (item) => item.id === selectedScenario,
-    );
-    if (!baseline || !scenario) return;
-    selectedBaseline = id;
-
-    for (const button of baselineButtons) {
-      const active = button.dataset.baseline === id;
-      button.setAttribute("aria-selected", String(active));
-      button.tabIndex = active ? 0 : -1;
-    }
-
-    const strategy = scenario.strategies[id];
-    if (!isPlainObject(strategy)) throw new Error("Invalid strategy result");
-    app.querySelector('[data-role="baseline-value"]').textContent =
-      strategy.nodes;
-    app.querySelector('[data-role="baseline-metric-label"]').textContent =
-      strategy.metricLabel;
-
-    const badge = app.querySelector('[data-role="baseline-badge"]');
-    badge.dataset.result = strategy.result;
-    badge.textContent = strategy.resultLabel;
-    app.querySelector('[data-role="baseline-title"]').textContent =
-      strategy.title;
-    app.querySelector('[data-role="baseline-text"]').textContent =
-      strategy.text;
-  }
-
-  function initializeNavigationObserver() {
-    if (!("IntersectionObserver" in window)) return;
-    const links = [...app.querySelectorAll("[data-section-link]")];
-    const sections = links
-      .map((anchor) => app.querySelector(`#${CSS.escape(anchor.dataset.sectionLink)}`))
-      .filter(Boolean);
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-        if (!visible) return;
-        for (const anchor of links) {
-          anchor.setAttribute(
-            "aria-current",
-            String(anchor.dataset.sectionLink === visible.target.id),
-          );
-        }
-      },
-      { rootMargin: "-20% 0px -65% 0px", threshold: [0, 0.25, 0.6] },
-    );
-    sections.forEach((section) => observer.observe(section));
-  }
-
-  async function copyText(text) {
-    try {
-      await navigator.clipboard.writeText(text);
-      showToast("Pitch copied to clipboard.");
-    } catch {
-      showToast("Copy was unavailable. Select the pitch text manually.");
-    }
-  }
-
-  function showToast(message) {
-    const existing = document.querySelector(".toast");
-    if (existing) existing.remove();
-    const toast = make("div", "toast", message);
-    toast.setAttribute("role", "status");
-    document.body.append(toast);
-    window.setTimeout(() => toast.remove(), 3200);
-  }
-
-  window.addEventListener("pageshow", (event) => {
-    if (event.persisted && !app.hidden) {
-      window.location.reload();
-    }
   });
 
-  window.addEventListener("pagehide", () => {
-    if (!app.hidden) {
-      app.replaceChildren();
-      payload = undefined;
-    }
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted) window.location.reload();
   });
 })();

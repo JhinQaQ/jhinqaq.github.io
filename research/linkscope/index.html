@@ -9,7 +9,7 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; media-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
     />
-    <meta name="theme-color" content="#f4f1e8" />
+    <meta name="theme-color" content="#f7f8fa" />
     <title>Private research draft · Jin Yang</title>
     <link rel="stylesheet" href="./linkscope.css" />
     <script src="./linkscope.js" defer></script>
@@ -18,63 +18,73 @@
     <a class="skip-link" href="#research-app">Skip to research draft</a>
 
     <main class="gate-shell" id="access-gate">
-      <section class="gate-card" aria-labelledby="gate-title">
-        <a class="site-mark" href="/" aria-label="Return to Jin Yang's homepage">
-          <span class="site-mark__glyph" aria-hidden="true">JY</span>
-          <span>Jin Yang · research notes</span>
-        </a>
+      <section class="gate-notebook" aria-labelledby="gate-title">
+        <header class="gate-topbar">
+          <p>research / private / walkthrough.ipynb</p>
+          <a href="/" aria-label="Return to Jin Yang's homepage">JY / home</a>
+        </header>
 
-        <div class="gate-signal" aria-hidden="true">
-          <span></span><span></span><span></span><span></span>
+        <div class="gate-cell">
+          <div class="gate-cell__rail" aria-hidden="true">In&nbsp;[ ]</div>
+          <div class="gate-cell__main">
+            <div class="gate-cell__head">
+              <code>unlock(private_research_draft)</code>
+            </div>
+            <div class="gate-cell__body">
+              <p class="gate-kicker">encrypted advisor draft</p>
+              <h1 id="gate-title">Run the private research notebook</h1>
+              <p class="gate-copy">
+                Enter the shared access phrase. The encrypted draft is unlocked
+                locally in this browser.
+              </p>
+
+              <form id="unlock-form" class="unlock-form">
+                <label for="access-phrase">Access phrase</label>
+                <div class="password-row">
+                  <input
+                    id="access-phrase"
+                    name="access-phrase"
+                    type="password"
+                    autocomplete="off"
+                    minlength="16"
+                    required
+                    autofocus
+                  />
+                  <button
+                    class="reveal-button"
+                    id="reveal-phrase"
+                    type="button"
+                    aria-pressed="false"
+                    aria-label="Show access phrase"
+                  >
+                    Show
+                  </button>
+                </div>
+                <button class="unlock-button" type="submit">
+                  <span aria-hidden="true">▶</span>
+                  <span>run cell</span>
+                </button>
+                <p
+                  class="gate-status"
+                  id="gate-status"
+                  role="status"
+                  aria-live="polite"
+                >
+                  The phrase is never sent to a server.
+                </p>
+              </form>
+            </div>
+          </div>
         </div>
 
-        <p class="eyebrow">Private discussion draft</p>
-        <h1 id="gate-title">Enter the shared access phrase</h1>
-        <p class="gate-copy">
-          This page contains an early research direction prepared for advisor
-          feedback. Its contents are encrypted in the deployed site and
-          unlocked locally in your browser.
-        </p>
-
-        <form id="unlock-form" class="unlock-form">
-          <label for="access-phrase">Access phrase</label>
-          <div class="password-row">
-            <input
-              id="access-phrase"
-              name="access-phrase"
-              type="password"
-              autocomplete="current-password"
-              minlength="16"
-              required
-              autofocus
-            />
-            <button
-              class="reveal-button"
-              id="reveal-phrase"
-              type="button"
-              aria-pressed="false"
-              aria-label="Show access phrase"
-            >
-              Show
-            </button>
-          </div>
-          <button class="unlock-button" type="submit">
-            <span>Unlock research draft</span>
-            <span aria-hidden="true">→</span>
-          </button>
-          <p class="gate-status" id="gate-status" role="status" aria-live="polite">
-            The phrase is never sent to a server.
-          </p>
-        </form>
-
         <p class="gate-note">
-          Static encrypted sharing protects the draft from casual access. It
-          does not provide identity-based authorization.
+          Static encrypted sharing protects against casual access; it is not
+          identity-based authorization.
         </p>
       </section>
     </main>
 
-    <main id="research-app" hidden></main>
+    <main id="research-app" tabindex="-1" hidden></main>
 
     <noscript>
       <div class="noscript-message">
