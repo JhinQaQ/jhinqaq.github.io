@@ -199,12 +199,27 @@
     );
 
     const model = requireObject(candidate.model, "model");
+    const symbols = requireArray(model.symbols, "model symbols");
+    if (symbols.length < 4) throw new Error("Missing model symbols");
+    for (const symbolValue of symbols) {
+      const symbol = requireObject(symbolValue, "model symbol");
+      ["symbol", "meaning"].forEach((field) =>
+        requireString(symbol[field], `model symbol ${field}`),
+      );
+    }
     requireString(requireObject(model.proxy, "proxy").code, "proxy code");
+    const coreDistinction = requireObject(
+      model.coreDistinction,
+      "core distinction",
+    );
+    ["traditional", "unsafeShortcut", "linkscope"].forEach((field) =>
+      requireString(coreDistinction[field], `core distinction ${field}`),
+    );
     const executionFrame = requireObject(
       model.executionFrame,
       "execution frame",
     );
-    ["formula", "proofTransport"].forEach((field) =>
+    ["formula", "whyNotConcatenation", "proofTransport"].forEach((field) =>
       requireString(executionFrame[field], `execution frame ${field}`),
     );
     requireString(requireObject(model.query, "query").code, "query code");
@@ -460,13 +475,40 @@
     }
 
     const formal = requireObject(candidate.formalCore, "formal core");
+    const definitions = requireArray(formal.definitions, "formal definitions");
+    if (definitions.length < 3) throw new Error("Missing formal definitions");
+    const definitionSymbols = new Set();
+    for (const definitionValue of definitions) {
+      const definition = requireObject(definitionValue, "formal definition");
+      ["symbol", "meaning"].forEach((field) =>
+        requireString(definition[field], `formal definition ${field}`),
+      );
+      if (definitionSymbols.has(definition.symbol)) {
+        throw new Error("Duplicate formal definition");
+      }
+      definitionSymbols.add(definition.symbol);
+    }
+    for (const prefix of ["ResolveCert", "ProofCert", "ResultCert"]) {
+      if (![...definitionSymbols].some((symbol) => symbol.startsWith(prefix))) {
+        throw new Error(`Missing ${prefix} definition`);
+      }
+    }
     const theorems = requireArray(formal.theorems, "theorems");
     if (theorems.length < 3) throw new Error("Missing formal claims");
+    const theoremIds = new Set();
     for (const theoremValue of theorems) {
       const theorem = requireObject(theoremValue, "theorem");
       ["id", "title", "statement", "meaning"].forEach((field) =>
         requireString(theorem[field], `theorem ${field}`),
       );
+      if (theoremIds.has(theorem.id)) throw new Error("Duplicate theorem");
+      theoremIds.add(theorem.id);
+    }
+    for (const id of [
+      "incremental_fresh_equivalence",
+      "demand_sufficiency",
+    ]) {
+      if (!theoremIds.has(id)) throw new Error(`Missing ${id} theorem`);
     }
     requireString(formal.hardPart, "formal hard part");
 
@@ -483,6 +525,15 @@
       requireString(novelty[field], `novelty ${field}`),
     );
     requireArray(novelty.notClaims, "not-claims");
+    for (const field of [
+      "whatTheExampleProves",
+      "whatTheExampleDoesNotProve",
+      "paperThreshold",
+    ]) {
+      const items = requireArray(novelty[field], `novelty ${field}`);
+      if (items.length === 0) throw new Error(`Missing novelty ${field}`);
+      items.forEach((item) => requireString(item, `novelty ${field} item`));
+    }
 
     const priorWork = requireArray(candidate.priorWork, "prior work");
     if (priorWork.length < 3) throw new Error("Missing prior work");
@@ -769,6 +820,36 @@
     const section = make("section", "problem-first");
     section.id = "problem";
 
+    const framing = make("div", "research-framing");
+    const framingLabel = make(
+      "p",
+      "research-domain",
+      "software verification · incremental program analysis",
+    );
+    const fixedFrame = make("div", "research-frame-card");
+    fixedFrame.dataset.kind = "baseline";
+    fixedFrame.append(
+      make("p", "research-frame-label", "What is already solved"),
+      make("h3", "", "One fixed snapshot"),
+      make("p", "", data.model.coreDistinction.traditional),
+      make("code", "", data.methods.find((item) => item.id === "fresh").call),
+    );
+    const incrementalFrame = make("div", "research-frame-card");
+    incrementalFrame.dataset.kind = "question";
+    incrementalFrame.append(
+      make("p", "research-frame-label", "Where the research begins"),
+      make("h3", "", "The resolved program changes"),
+      make("p", "research-claim", data.meta.oneSentenceClaim),
+      make(
+        "code",
+        "",
+        data.formalCore.theorems.find(
+          (item) => item.id === "incremental_fresh_equivalence",
+        ).statement,
+      ),
+    );
+    framing.append(framingLabel, fixedFrame, incrementalFrame);
+
     const intro = make("div", "problem-intro");
     intro.append(
       make("p", "problem-eyebrow", data.problemFirst.eyebrow),
@@ -776,6 +857,49 @@
       make("p", "problem-lead", data.problemFirst.lead),
       make("pre", "problem-code", data.problemFirst.code),
     );
+
+    const storyHead = make("div", "story-head");
+    storyHead.append(
+      make("h3", "", "Run the same property through three snapshots"),
+      make(
+        "p",
+        "",
+        "Choose a snapshot to load its exact code change, proof work, and verifier result.",
+      ),
+    );
+    const snapshotStory = make("div", "snapshot-story");
+    const storyNodes = { s0: "outcome", s1: "summary", s2: "slice" };
+    for (const snapshot of data.snapshots) {
+      const button = make("button", "snapshot-story-card");
+      button.type = "button";
+      button.dataset.storySnapshot = snapshot.id;
+      button.setAttribute("aria-controls", "verification-output");
+      button.setAttribute(
+        "aria-pressed",
+        String(snapshot.id === selectedSnapshot),
+      );
+      const verdict = make(
+        "strong",
+        "story-verdict",
+        snapshot.referenceOutcome.label,
+      );
+      verdict.dataset.verdict = snapshot.referenceOutcome.verdict;
+      button.append(
+        make("span", "story-step", snapshot.id.toUpperCase()),
+        make("h3", "", snapshot.title),
+        make("p", "", snapshot.relevantChange),
+        verdict,
+      );
+      button.addEventListener("click", () =>
+        applyProblemState(
+          snapshot.id,
+          "linkscope",
+          storyNodes[snapshot.id],
+        ),
+      );
+      snapshotStory.append(button);
+      refs.storyButtons.push(button);
+    }
 
     const comparison = make("div", "problem-comparison");
     for (const [kind, label, copy] of [
@@ -794,33 +918,59 @@
     const open = make("p", "problem-open", data.problemFirst.open);
     answer.append(solved, open);
 
+    const guideHead = make("div", "story-head");
+    guideHead.append(
+      make("h3", "", "Compare the four important verifier runs"),
+      make(
+        "p",
+        "",
+        "The first pair shows the reuse opportunity; the second pair shows the stale-proof failure and the sound response.",
+      ),
+    );
     const controls = make("div", "problem-controls");
-    const failureButton = make(
-      "button",
-      "secondary-button",
-      data.problemFirst.failureButton,
-    );
-    failureButton.type = "button";
-    failureButton.dataset.problemMethod = "stale";
-    failureButton.setAttribute("aria-pressed", "false");
-    failureButton.addEventListener("click", () =>
-      applyProblemState("stale", "outcome"),
-    );
-    const solutionButton = make(
-      "button",
-      "run-button",
-      data.problemFirst.solutionButton,
-    );
-    solutionButton.type = "button";
-    solutionButton.dataset.problemMethod = "linkscope";
-    solutionButton.setAttribute("aria-pressed", "true");
-    solutionButton.addEventListener("click", () =>
-      applyProblemState("linkscope", "slice"),
-    );
-    controls.append(failureButton, solutionButton);
-    refs.problemButtons = [failureButton, solutionButton];
+    const guideRuns = [
+      { snapshot: "s1", method: "fresh", node: "outcome" },
+      { snapshot: "s1", method: "linkscope", node: "summary" },
+      { snapshot: "s2", method: "stale", node: "outcome" },
+      { snapshot: "s2", method: "linkscope", node: "slice" },
+    ];
+    guideRuns.forEach((run, index) => {
+      const snapshot = data.snapshots.find((item) => item.id === run.snapshot);
+      const method = data.methods.find((item) => item.id === run.method);
+      const result = snapshot.methodResults[run.method];
+      const button = make("button", "guide-button");
+      button.type = "button";
+      button.dataset.problemSnapshot = run.snapshot;
+      button.dataset.problemMethod = run.method;
+      button.dataset.problemNode = run.node;
+      button.setAttribute("aria-controls", "verification-output");
+      button.setAttribute("aria-pressed", "false");
+      button.append(
+        make("span", "guide-number", String(index + 1)),
+        make(
+          "strong",
+          "",
+          `${method.label} at ${run.snapshot.toUpperCase()}`,
+        ),
+        make("span", "guide-result", result.badge),
+      );
+      button.addEventListener("click", () =>
+        applyProblemState(run.snapshot, run.method, run.node),
+      );
+      controls.append(button);
+      refs.problemButtons.push(button);
+    });
 
-    section.append(intro, comparison, answer, controls);
+    section.append(
+      framing,
+      intro,
+      storyHead,
+      snapshotStory,
+      comparison,
+      guideHead,
+      controls,
+      answer,
+    );
     return section;
   }
 
@@ -840,6 +990,7 @@
       concernButtons: new Map(),
       priorButtons: [],
       problemButtons: [],
+      storyButtons: [],
       meterUnits: [],
       discoverySteps: [],
       renderedConcernId: "",
@@ -899,7 +1050,48 @@
       make("code", "", data.model.executionFrame.formula),
       make("p", "", data.model.executionFrame.proofTransport),
     );
-    definitionCell.panel.append(codePair, refs.propertyCode, frameProof);
+    const symbolStrip = make("div", "symbol-strip");
+    data.model.symbols.slice(0, 4).forEach((item) => {
+      const symbol = make("div", "symbol-card");
+      symbol.append(
+        make("code", "", item.symbol),
+        make("p", "", item.meaning),
+      );
+      symbolStrip.append(symbol);
+    });
+
+    const transportDefinitions = ["ResolveCert", "ProofCert", "ResultCert"].map(
+      (prefix) =>
+        data.formalCore.definitions.find((item) =>
+          item.symbol.startsWith(prefix),
+        ),
+    );
+    const transportCode = [
+      `${transportDefinitions[0].symbol}\n  ${transportDefinitions[0].meaning}`,
+      "+",
+      `${transportDefinitions[1].symbol}\n  ${transportDefinitions[1].meaning}`,
+      "↓",
+      `${transportDefinitions[2].symbol}\n  ${transportDefinitions[2].meaning}`,
+    ].join("\n\n");
+    frameProof.replaceChildren();
+    const frameMeaning = make("div", "frame-meaning");
+    frameMeaning.append(
+      make("code", "", data.model.executionFrame.formula),
+      make("p", "", data.model.executionFrame.whyNotConcatenation),
+    );
+    const transport = make("div", "transport");
+    transport.append(
+      make("pre", "transport-code", transportCode),
+      make("p", "", data.model.executionFrame.proofTransport),
+    );
+    frameProof.append(frameMeaning, transport);
+
+    definitionCell.panel.append(
+      symbolStrip,
+      codePair,
+      refs.propertyCode,
+      frameProof,
+    );
     refs.definitionOutput = make("div", "output-line");
     refs.definitionOutput.tabIndex = -1;
     refs.definitionOutputLabel = make("strong", "output-label");
@@ -949,20 +1141,18 @@
     refs.verificationOutput.setAttribute("aria-live", "polite");
     refs.verificationOutput.setAttribute("aria-labelledby", "method-linkscope");
     const resultRow = make("div", "result-row");
-    refs.resultBadge = make("div", "result-badge");
-    refs.resultBadge.dataset.role = "result-badge";
-    const resultCopy = make("div", "result-copy");
+    const verdictStack = make("div", "verdict-stack");
     refs.verifierStatus = make("p", "verifier-status");
     refs.verifierStatus.dataset.role = "verifier-status";
+    refs.resultBadge = make("div", "result-badge");
+    refs.resultBadge.dataset.role = "result-badge";
+    verdictStack.append(refs.verifierStatus, refs.resultBadge);
+    const resultCopy = make("div", "result-copy");
     refs.resultHeadline = make("h3");
     refs.resultExplanation = make("p");
     refs.resultExplanation.dataset.role = "method-explanation";
-    resultCopy.append(
-      refs.verifierStatus,
-      refs.resultHeadline,
-      refs.resultExplanation,
-    );
-    resultRow.append(refs.resultBadge, resultCopy);
+    resultCopy.append(refs.resultHeadline, refs.resultExplanation);
+    resultRow.append(verdictStack, resultCopy);
     refs.methodTrace = make("pre", "discovery-console");
     refs.methodTrace.dataset.role = "method-trace";
     refs.verificationOutput.append(resultRow, refs.methodTrace);
@@ -1111,8 +1301,23 @@
     const formalBody = make("div", "formal-body");
     formalBody.id = "novelty";
     const claimGrid = make("div", "claim-grid");
-    for (const theorem of data.formalCore.theorems) {
+    const primaryClaimIds = [
+      "incremental_fresh_equivalence",
+      "demand_sufficiency",
+    ];
+    const orderedClaims = [
+      ...primaryClaimIds.map((id) =>
+        data.formalCore.theorems.find((item) => item.id === id),
+      ),
+      ...data.formalCore.theorems.filter(
+        (item) => !primaryClaimIds.includes(item.id),
+      ),
+    ];
+    for (const theorem of orderedClaims) {
       const card = make("section", "claim-card");
+      card.dataset.priority = primaryClaimIds.includes(theorem.id)
+        ? "primary"
+        : "supporting";
       card.append(
         make("p", "claim-label", theorem.title),
         make("pre", "formula-code", theorem.statement),
@@ -1129,6 +1334,46 @@
       }
       claimGrid.append(card);
     }
+    const boundaryHeading = make("div", "boundary-heading");
+    boundaryHeading.append(
+      make("p", "advisor-eyebrow", "honest status"),
+      make("h3", "", data.noveltyBoundary.candidateTopic),
+      make("p", "", data.noveltyBoundary.candidateContribution),
+    );
+    const boundaryGrid = make("div", "boundary-grid");
+    for (const [kind, title, items] of [
+      [
+        "solved",
+        "What the worked example establishes",
+        data.noveltyBoundary.whatTheExampleProves,
+      ],
+      [
+        "open",
+        "What it does not establish",
+        data.noveltyBoundary.whatTheExampleDoesNotProve,
+      ],
+    ]) {
+      const card = make("section", "boundary-card");
+      card.dataset.kind = kind;
+      const list = make("ul");
+      items.forEach((item) => list.append(make("li", "", item)));
+      card.append(make("h3", "", title), list);
+      boundaryGrid.append(card);
+    }
+    const threshold = make("section", "paper-threshold");
+    const thresholdList = make("ul");
+    data.noveltyBoundary.paperThreshold.forEach((item) =>
+      thresholdList.append(make("li", "", item)),
+    );
+    threshold.append(
+      make("h3", "", "What would make this a paper"),
+      thresholdList,
+      make(
+        "p",
+        "falsification-question",
+        data.noveltyBoundary.falsificationQuestion,
+      ),
+    );
     const noveltyWarning = make(
       "div",
       "novelty-warning",
@@ -1169,7 +1414,10 @@
     refs.priorOutput.append(priorCovered, priorMissing);
 
     formalBody.append(
+      boundaryHeading,
       claimGrid,
+      boundaryGrid,
+      threshold,
       noveltyWarning,
       make("p", "advisor-eyebrow", "closest work — click to compare"),
       priorTabs,
@@ -1295,8 +1543,8 @@
     if (announce) refs.nodeInspector.focus?.({ preventScroll: true });
   }
 
-  function applyProblemState(methodId, nodeId) {
-    selectedSnapshot = "s2";
+  function applyProblemState(snapshotId, methodId, nodeId) {
+    selectedSnapshot = snapshotId;
     selectedMethod = methodId;
     selectedNode = nodeId;
     selectedConcernStep = "";
@@ -1312,9 +1560,18 @@
   function updateProblemControls() {
     for (const button of refs.problemButtons) {
       const active =
-        selectedSnapshot === "s2" &&
+        button.dataset.problemSnapshot === selectedSnapshot &&
         button.dataset.problemMethod === selectedMethod;
       button.setAttribute("aria-pressed", String(active));
+    }
+    for (const button of refs.storyButtons) {
+      button.setAttribute(
+        "aria-pressed",
+        String(
+          button.dataset.storySnapshot === selectedSnapshot &&
+            selectedMethod === "linkscope",
+        ),
+      );
     }
   }
 
