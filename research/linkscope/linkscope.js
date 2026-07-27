@@ -64,10 +64,10 @@
 
   let envelopePromise;
   let payload;
-  let selectedSnapshot = "s1";
+  let selectedSnapshot = "s2";
   let selectedMethod = "linkscope";
-  let selectedNode = "summary";
-  let selectedConcern = "why_not_combine";
+  let selectedNode = "slice";
+  let selectedConcern = "does_it_solve";
   let selectedConcernStep = "";
   let selectedPrior = 0;
   let discoveryCount = 0;
@@ -177,6 +177,26 @@
         requireString(cell[field], `notebook cell ${field}`),
       );
     }
+
+    const problemFirst = requireObject(
+      candidate.problemFirst,
+      "problem-first section",
+    );
+    [
+      "eyebrow",
+      "title",
+      "lead",
+      "code",
+      "baseline",
+      "failure",
+      "solution",
+      "solved",
+      "open",
+      "failureButton",
+      "solutionButton",
+    ].forEach((field) =>
+      requireString(problemFirst[field], `problem-first ${field}`),
+    );
 
     const model = requireObject(candidate.model, "model");
     requireString(requireObject(model.proxy, "proxy").code, "proxy code");
@@ -342,14 +362,14 @@
 
     const concerns = requireArray(
       candidate.advisorConcerns,
-      "advisor concerns",
+      "questions",
     );
-    if (concerns.length < 5) throw new Error("Missing advisor concerns");
+    if (concerns.length < 5) throw new Error("Missing questions");
     const concernIds = new Set();
     for (const concernValue of concerns) {
-      const concern = requireObject(concernValue, "advisor concern");
-      const id = requireString(concern.id, "advisor concern id");
-      if (concernIds.has(id)) throw new Error("Duplicate advisor concern");
+      const concern = requireObject(concernValue, "question");
+      const id = requireString(concern.id, "question id");
+      if (concernIds.has(id)) throw new Error("Duplicate question");
       concernIds.add(id);
       [
         "tabLabel",
@@ -359,30 +379,30 @@
         "code",
         "bottomLine",
       ].forEach((field) =>
-        requireString(concern[field], `advisor concern ${field}`),
+        requireString(concern[field], `question ${field}`),
       );
-      const demo = requireObject(concern.clickDemo, "advisor demo");
+      const demo = requireObject(concern.clickDemo, "question demo");
       if (
         !snapshotIds.includes(demo.snapshot) ||
         !methodIds.includes(demo.method) ||
         !nodeIds.has(demo.node)
       ) {
-        throw new Error("Invalid advisor demo");
+        throw new Error("Invalid question demo");
       }
       const demoSteps = requireArray(
         concern.demoSteps,
-        "advisor demo steps",
+        "question demo steps",
       );
-      if (demoSteps.length === 0) throw new Error("Missing advisor demo steps");
+      if (demoSteps.length === 0) throw new Error("Missing question demo steps");
       for (const stepValue of demoSteps) {
-        const step = requireObject(stepValue, "advisor demo step");
-        requireString(step.label, "advisor demo step label");
+        const step = requireObject(stepValue, "question demo step");
+        requireString(step.label, "question demo step label");
         if (
           !snapshotIds.includes(step.snapshot) ||
           !methodIds.includes(step.method) ||
           !nodeIds.has(step.node)
         ) {
-          throw new Error("Invalid advisor demo step");
+          throw new Error("Invalid question demo step");
         }
       }
     }
@@ -745,12 +765,71 @@
     });
   }
 
+  function renderProblemFirst(data) {
+    const section = make("section", "problem-first");
+    section.id = "problem";
+
+    const intro = make("div", "problem-intro");
+    intro.append(
+      make("p", "problem-eyebrow", data.problemFirst.eyebrow),
+      make("h2", "", data.problemFirst.title),
+      make("p", "problem-lead", data.problemFirst.lead),
+      make("pre", "problem-code", data.problemFirst.code),
+    );
+
+    const comparison = make("div", "problem-comparison");
+    for (const [kind, label, copy] of [
+      ["baseline", "Fresh baseline", data.problemFirst.baseline],
+      ["failure", "Unsafe transport", data.problemFirst.failure],
+      ["solution", "LinkScope response", data.problemFirst.solution],
+    ]) {
+      const card = make("div", "problem-card");
+      card.dataset.kind = kind;
+      card.append(make("strong", "", label), make("p", "", copy));
+      comparison.append(card);
+    }
+
+    const answer = make("div", "problem-answer");
+    const solved = make("p", "problem-solved", data.problemFirst.solved);
+    const open = make("p", "problem-open", data.problemFirst.open);
+    answer.append(solved, open);
+
+    const controls = make("div", "problem-controls");
+    const failureButton = make(
+      "button",
+      "secondary-button",
+      data.problemFirst.failureButton,
+    );
+    failureButton.type = "button";
+    failureButton.dataset.problemMethod = "stale";
+    failureButton.setAttribute("aria-pressed", "false");
+    failureButton.addEventListener("click", () =>
+      applyProblemState("stale", "outcome"),
+    );
+    const solutionButton = make(
+      "button",
+      "run-button",
+      data.problemFirst.solutionButton,
+    );
+    solutionButton.type = "button";
+    solutionButton.dataset.problemMethod = "linkscope";
+    solutionButton.setAttribute("aria-pressed", "true");
+    solutionButton.addEventListener("click", () =>
+      applyProblemState("linkscope", "slice"),
+    );
+    controls.append(failureButton, solutionButton);
+    refs.problemButtons = [failureButton, solutionButton];
+
+    section.append(intro, comparison, answer, controls);
+    return section;
+  }
+
   function renderNotebook(data) {
     payload = data;
-    selectedSnapshot = "s1";
+    selectedSnapshot = "s2";
     selectedMethod = "linkscope";
-    selectedNode = "summary";
-    selectedConcern = "why_not_combine";
+    selectedNode = "slice";
+    selectedConcern = "does_it_solve";
     selectedConcernStep = "";
     selectedPrior = 0;
     discoveryCount = 0;
@@ -760,6 +839,7 @@
       proofButtons: new Map(),
       concernButtons: new Map(),
       priorButtons: [],
+      problemButtons: [],
       meterUnits: [],
       discoverySteps: [],
       renderedConcernId: "",
@@ -777,14 +857,18 @@
     const badge = make("div", "draft-badge", data.meta.status);
     header.append(headingCopy, badge);
 
+    const problemFirst = renderProblemFirst(data);
     const workspace = make("div", "workspace");
     const notebookMain = make("main", "notebook-main");
     const experiment = renderExperiment(data);
 
     const definitionOutput = makeOutputCell("Out [1]", "definition-output");
+    const definitionMeta = data.notebook.cells.find(
+      (item) => item.id === "define",
+    );
     const definitionCell = makeCell(
-      "In [1]",
-      data.notebook.cells.find((item) => item.id === "define").title,
+      definitionMeta.prompt,
+      definitionMeta.title,
       "definition",
       makeRunButton("show current result", "definition-output", () => {
         refs.definitionOutput.focus({ preventScroll: true });
@@ -826,9 +910,12 @@
     );
     definitionOutput.panel.append(refs.definitionOutput);
 
+    const compareMeta = data.notebook.cells.find(
+      (item) => item.id === "compare",
+    );
     const verifyCell = makeCell(
-      "In [2]",
-      data.notebook.cells.find((item) => item.id === "compare").title,
+      compareMeta.prompt,
+      compareMeta.title,
       "verify",
       makeRunButton("show selected result", "verification-output", () => {
         updateExperiment();
@@ -865,19 +952,28 @@
     refs.resultBadge = make("div", "result-badge");
     refs.resultBadge.dataset.role = "result-badge";
     const resultCopy = make("div", "result-copy");
+    refs.verifierStatus = make("p", "verifier-status");
+    refs.verifierStatus.dataset.role = "verifier-status";
     refs.resultHeadline = make("h3");
     refs.resultExplanation = make("p");
     refs.resultExplanation.dataset.role = "method-explanation";
-    resultCopy.append(refs.resultHeadline, refs.resultExplanation);
+    resultCopy.append(
+      refs.verifierStatus,
+      refs.resultHeadline,
+      refs.resultExplanation,
+    );
     resultRow.append(refs.resultBadge, resultCopy);
     refs.methodTrace = make("pre", "discovery-console");
     refs.methodTrace.dataset.role = "method-trace";
     refs.verificationOutput.append(resultRow, refs.methodTrace);
     verifyCell.panel.append(methodTabs, refs.verificationOutput);
 
+    const dependencyMeta = data.notebook.cells.find(
+      (item) => item.id === "dependencies",
+    );
     const dependencyCell = makeCell(
-      "In [3]",
-      data.notebook.cells.find((item) => item.id === "dependencies").title,
+      dependencyMeta.prompt,
+      dependencyMeta.title,
       "dependencies",
     );
     const dependencyBody = make("div", "method-output");
@@ -905,18 +1001,22 @@
     dependencyBody.append(proofGrid, refs.nodeInspector, legend);
     dependencyCell.panel.append(dependencyBody);
 
-    const concernCell = makeCell(
-      "In [4]",
-      data.notebook.cells.find((item) => item.id === "concerns").title,
-      "advisor",
+    const questionMeta = data.notebook.cells.find(
+      (item) => item.id === "concerns",
     );
+    const concernCell = makeCell(
+      questionMeta.prompt,
+      questionMeta.title,
+      "questions",
+    );
+    concernCell.cell.classList.add("qa-cell");
     const concernBody = make("div", "concern-body");
     const concernTabs = make("div", "concern-tabs");
     for (const concern of data.advisorConcerns) {
       const button = make("button", "concern-tab", concern.tabLabel);
       button.type = "button";
       button.dataset.question = concern.id;
-      button.setAttribute("aria-controls", "advisor-answer");
+      button.setAttribute("aria-controls", "qa-answer");
       button.setAttribute(
         "aria-pressed",
         String(concern.id === selectedConcern),
@@ -926,14 +1026,15 @@
       refs.concernButtons.set(concern.id, button);
     }
     refs.advisorAnswer = make("div", "advisor-answer");
-    refs.advisorAnswer.id = "advisor-answer";
+    refs.advisorAnswer.id = "qa-answer";
     const advisorQuestion = make("div", "advisor-question");
-    advisorQuestion.append(make("p", "advisor-eyebrow", "advisor concern"));
+    advisorQuestion.append(make("p", "qa-marker", "Q"));
     refs.concernQuestion = make("h3");
     refs.concernQuestion.tabIndex = -1;
     refs.concernShort = make("p");
     advisorQuestion.append(refs.concernQuestion, refs.concernShort);
     const advisorResult = make("div", "advisor-result");
+    advisorResult.append(make("p", "qa-marker", "A"));
     refs.concernCode = make("code");
     refs.concernAnswer = make("p");
     refs.concernBottom = make("p");
@@ -949,9 +1050,12 @@
     concernBody.append(concernTabs, refs.advisorAnswer);
     concernCell.panel.append(concernBody);
 
+    const discoveryMeta = data.notebook.cells.find(
+      (item) => item.id === "discover",
+    );
     const discoveryCell = makeCell(
-      "In [5]",
-      data.notebook.cells.find((item) => item.id === "discover").title,
+      discoveryMeta.prompt,
+      discoveryMeta.title,
       "discovery",
       makeRunButton("show next fact", "discovery-output", () => {
         revealNextFact();
@@ -996,9 +1100,12 @@
     );
     discoveryCell.panel.append(discoveryBody);
 
+    const formalMeta = data.notebook.cells.find(
+      (item) => item.id === "formal",
+    );
     const formalCell = makeCell(
-      "In [6]",
-      data.notebook.cells.find((item) => item.id === "formal").title,
+      formalMeta.prompt,
+      formalMeta.title,
       "formal",
     );
     const formalBody = make("div", "formal-body");
@@ -1074,8 +1181,8 @@
       definitionCell.cell,
       definitionOutput.cell,
       verifyCell.cell,
-      dependencyCell.cell,
       concernCell.cell,
+      dependencyCell.cell,
       discoveryCell.cell,
       formalCell.cell,
     );
@@ -1086,7 +1193,7 @@
       make("p", "", data.meta.footer),
       makeLink(data.meta.homeLabel, "/", ""),
     );
-    root.append(header, workspace, footer);
+    root.append(header, problemFirst, workspace, footer);
 
     refs.heading = heading;
     updateAll();
@@ -1188,8 +1295,32 @@
     if (announce) refs.nodeInspector.focus?.({ preventScroll: true });
   }
 
+  function applyProblemState(methodId, nodeId) {
+    selectedSnapshot = "s2";
+    selectedMethod = methodId;
+    selectedNode = nodeId;
+    selectedConcernStep = "";
+    discoveryCount = 0;
+    updateAll();
+    refs.verificationOutput.scrollIntoView({
+      block: "center",
+      behavior: "smooth",
+    });
+    refs.verificationOutput.focus({ preventScroll: true });
+  }
+
+  function updateProblemControls() {
+    for (const button of refs.problemButtons) {
+      const active =
+        selectedSnapshot === "s2" &&
+        button.dataset.problemMethod === selectedMethod;
+      button.setAttribute("aria-pressed", String(active));
+    }
+  }
+
   function updateAll() {
     updateTabStates();
+    updateProblemControls();
     updateDefinition();
     updateExperiment();
     updateProofNodes();
@@ -1227,6 +1358,25 @@
     refs.definitionOutputText.textContent = reference.reason;
   }
 
+  function verifierStatusFor(result) {
+    if (result.correctness === "correct") {
+      return { state: "correct", label: "VERIFIER · MATCHES FRESH ✓" };
+    }
+    if (result.correctness === "correct_initial_run") {
+      return { state: "limited", label: "VERIFIER · VALID AT S0 ONLY" };
+    }
+    if (
+      result.correctness === "accidentally_correct_but_unjustified" ||
+      result.correctness === "accidentally_correct_but_policy_unsound"
+    ) {
+      return {
+        state: "unsound",
+        label: "VERIFIER · BOOLEAN MATCHES, POLICY UNSOUND",
+      };
+    }
+    return { state: "wrong", label: "VERIFIER · WRONG VS FRESH ✗" };
+  }
+
   function updateExperiment() {
     const snapshot = getSnapshot();
     const method = getMethod();
@@ -1234,6 +1384,9 @@
 
     refs.resultBadge.textContent = result.badge;
     refs.resultBadge.dataset.tone = result.tone;
+    const verifierStatus = verifierStatusFor(result);
+    refs.verifierStatus.textContent = verifierStatus.label;
+    refs.verifierStatus.dataset.state = verifierStatus.state;
     refs.resultHeadline.textContent = result.headline;
     refs.resultExplanation.textContent = result.explanation;
     refs.methodTrace.textContent = result.trace
@@ -1465,13 +1618,77 @@
     );
   }
 
+  function consumePasswordFragment(allowDecode) {
+    const hash = window.location.hash;
+    if (!hash.startsWith("#pwd=")) {
+      return { recognized: false, phrase: "", error: "" };
+    }
+
+    const encoded = hash.slice(5);
+    try {
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${window.location.pathname}${window.location.search}`,
+      );
+    } catch {
+      return {
+        recognized: true,
+        phrase: "",
+        error: "The password link could not be cleared safely. Enter the phrase manually.",
+      };
+    }
+    if (window.location.hash !== "") {
+      return {
+        recognized: true,
+        phrase: "",
+        error: "The password link could not be cleared safely. Enter the phrase manually.",
+      };
+    }
+    if (!allowDecode) {
+      return { recognized: true, phrase: "", error: "" };
+    }
+    if (
+      encoded.length === 0 ||
+      encoded.length > 1024 ||
+      encoded.includes("&")
+    ) {
+      return {
+        recognized: true,
+        phrase: "",
+        error: "This password link is malformed. Enter the phrase manually.",
+      };
+    }
+
+    let phrase;
+    try {
+      phrase = decodeURIComponent(encoded).normalize("NFKC");
+    } catch {
+      return {
+        recognized: true,
+        phrase: "",
+        error: "This password link is malformed. Enter the phrase manually.",
+      };
+    }
+    if (phrase.length < 16 || phrase.length > 256) {
+      return {
+        recognized: true,
+        phrase: "",
+        error: "This password link is malformed. Enter the phrase manually.",
+      };
+    }
+    return { recognized: true, phrase, error: "" };
+  }
+
   let framed = true;
   try {
     framed = window.top !== window.self;
   } catch {
     framed = true;
   }
+  let passwordFragment = consumePasswordFragment(!framed);
   if (framed) {
+    passwordFragment = undefined;
     phraseInput.value = "";
     phraseInput.disabled = true;
     revealButton.disabled = true;
@@ -1482,6 +1699,43 @@
       "error",
     );
     return;
+  }
+
+  async function unlockWithPhrase(candidatePhrase) {
+    if (!window.crypto?.subtle) {
+      showGateStatus(
+        "This browser cannot decrypt the draft. Use a current browser over HTTPS.",
+        "error",
+      );
+      return;
+    }
+    phraseInput.value = "";
+    setBusy(true);
+    showGateStatus("Deriving a local decryption key…");
+    try {
+      const envelope = await getEnvelope();
+      const plaintext = await decrypt(envelope, candidatePhrase);
+      const candidate = validatePayload(JSON.parse(plaintext));
+      const rendered = renderNotebook(candidate);
+      app.replaceChildren(rendered);
+      gate.hidden = true;
+      app.hidden = false;
+      document.title = candidate.meta.pageTitle;
+      window.scrollTo({ top: 0, behavior: "instant" });
+      refs.heading.tabIndex = -1;
+      refs.heading.focus({ preventScroll: true });
+    } catch (error) {
+      console.error("Research draft unlock failed", error);
+      app.replaceChildren();
+      app.hidden = true;
+      showGateStatus("Could not unlock. Check the phrase and try again.", "error");
+      phraseInput.focus();
+      phraseInput.select();
+    } finally {
+      candidatePhrase = "";
+      phraseInput.value = "";
+      setBusy(false);
+    }
   }
 
   revealButton.addEventListener("click", () => {
@@ -1496,42 +1750,25 @@
     phraseInput.focus();
   });
 
-  form.addEventListener("submit", async (event) => {
+  form.addEventListener("submit", (event) => {
     event.preventDefault();
-    if (!window.crypto?.subtle) {
-      showGateStatus(
-        "This browser cannot decrypt the draft. Use a current browser over HTTPS.",
-        "error",
-      );
-      return;
-    }
-    setBusy(true);
-    showGateStatus("Deriving a local decryption key…");
-    try {
-      const envelope = await getEnvelope();
-      const plaintext = await decrypt(envelope, phraseInput.value);
-      const candidate = validatePayload(JSON.parse(plaintext));
-      const rendered = renderNotebook(candidate);
-      phraseInput.value = "";
-      app.replaceChildren(rendered);
-      gate.hidden = true;
-      app.hidden = false;
-      document.title = candidate.meta.pageTitle;
-      window.scrollTo({ top: 0, behavior: "instant" });
-      refs.heading.tabIndex = -1;
-      refs.heading.focus({ preventScroll: true });
-    } catch (error) {
-      console.error("Research draft unlock failed", error);
-      app.replaceChildren();
-      app.hidden = true;
-      phraseInput.value = "";
-      showGateStatus("Could not unlock. Check the phrase and try again.", "error");
-      phraseInput.focus();
-      phraseInput.select();
-    } finally {
-      setBusy(false);
-    }
+    const manualPhrase = phraseInput.value;
+    phraseInput.value = "";
+    void unlockWithPhrase(manualPhrase);
   });
+
+  if (passwordFragment.error) {
+    const fragmentError = passwordFragment.error;
+    passwordFragment = undefined;
+    showGateStatus(fragmentError, "error");
+  } else if (passwordFragment.phrase) {
+    const fragmentPhrase = passwordFragment.phrase;
+    passwordFragment.phrase = "";
+    passwordFragment = undefined;
+    void unlockWithPhrase(fragmentPhrase);
+  } else {
+    passwordFragment = undefined;
+  }
 
   window.addEventListener("pagehide", () => {
     payload = undefined;

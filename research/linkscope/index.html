@@ -31,11 +31,11 @@
               <code>unlock(private_research_draft)</code>
             </div>
             <div class="gate-cell__body">
-              <p class="gate-kicker">encrypted advisor draft</p>
+              <p class="gate-kicker">encrypted research draft</p>
               <h1 id="gate-title">Run the private research notebook</h1>
               <p class="gate-copy">
-                Enter the shared access phrase. The encrypted draft is unlocked
-                locally in this browser.
+                Enter the shared access phrase. A private password link is also
+                consumed locally and removed from the address before decryption.
               </p>
 
               <form id="unlock-form" class="unlock-form">
@@ -79,7 +79,8 @@
 
         <p class="gate-note">
           Static encrypted sharing protects against casual access; it is not
-          identity-based authorization.
+          identity-based authorization. Anyone holding the complete password
+          link can unlock the draft.
         </p>
       </section>
     </main>

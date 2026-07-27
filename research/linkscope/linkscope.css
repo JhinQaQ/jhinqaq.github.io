@@ -338,6 +338,121 @@ pre {
   content: "";
 }
 
+.problem-first {
+  margin: 20px 0 0 74px;
+  padding: 18px 20px 20px;
+  border: 1px solid var(--line-strong);
+  border-top: 4px solid var(--blue);
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: 0 2px 8px rgba(18, 24, 33, 0.05);
+}
+
+.problem-eyebrow {
+  margin: 0 0 5px;
+  color: var(--red);
+  font: 800 10px/1.2 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.problem-first h2 {
+  max-width: 980px;
+  margin: 0;
+  font-size: clamp(20px, 2.2vw, 30px);
+  line-height: 1.14;
+  letter-spacing: -0.025em;
+}
+
+.problem-lead {
+  max-width: 1040px;
+  margin: 8px 0 13px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.problem-code {
+  overflow-x: auto;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 5px;
+  color: var(--code-text);
+  background: var(--code);
+  font: 12px/1.6 var(--mono);
+}
+
+.problem-comparison {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 11px;
+}
+
+.problem-card {
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface-2);
+}
+
+.problem-card[data-kind="failure"] {
+  border-color: #e3aaae;
+  background: var(--red-soft);
+}
+
+.problem-card[data-kind="solution"] {
+  border-color: #95cbb7;
+  background: var(--green-soft);
+}
+
+.problem-card strong {
+  display: block;
+  margin-bottom: 4px;
+  font: 750 10px/1.2 var(--mono);
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.problem-card p {
+  margin: 0;
+  color: #4f5966;
+  font-size: 12.5px;
+}
+
+.problem-answer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.problem-solved,
+.problem-open {
+  margin: 0;
+  padding: 9px 11px;
+  border-left: 3px solid var(--green);
+  color: #33423a;
+  background: var(--green-soft);
+  font-size: 12.5px;
+}
+
+.problem-open {
+  border-left-color: var(--amber);
+  color: #5d4924;
+  background: var(--amber-soft);
+}
+
+.problem-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 11px;
+}
+
+.problem-controls button[aria-pressed="true"] {
+  box-shadow: inset 0 -2px 0 currentColor;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 370px;
@@ -635,6 +750,28 @@ pre {
   font: 750 15px/1.32 var(--mono);
 }
 
+.result-copy .verifier-status {
+  display: inline-block;
+  margin: 0 0 6px;
+  padding: 4px 7px;
+  border-radius: 4px;
+  color: var(--green);
+  background: var(--green-soft);
+  font: 800 9px/1.2 var(--mono);
+  letter-spacing: 0.04em;
+}
+
+.result-copy .verifier-status[data-state="limited"],
+.result-copy .verifier-status[data-state="unsound"] {
+  color: var(--amber);
+  background: var(--amber-soft);
+}
+
+.result-copy .verifier-status[data-state="wrong"] {
+  color: var(--red);
+  background: var(--red-soft);
+}
+
 .result-copy p {
   margin: 0;
   color: #515b68;
@@ -799,13 +936,30 @@ pre {
 
 .advisor-answer {
   display: grid;
-  grid-template-columns: minmax(0, 1.08fr) minmax(260px, 0.92fr);
-  gap: 14px;
+  gap: 8px;
 }
 
 .advisor-question {
-  padding: 3px 0 3px 13px;
-  border-left: 3px solid var(--amber);
+  position: relative;
+  padding: 12px 14px 12px 52px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+}
+
+.qa-marker {
+  position: absolute;
+  top: 12px;
+  left: 13px;
+  display: grid;
+  width: 25px;
+  height: 25px;
+  margin: 0;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--amber);
+  background: var(--amber-soft);
+  font: 850 12px/1 var(--mono);
 }
 
 .advisor-eyebrow {
@@ -831,11 +985,27 @@ pre {
   font-size: 13px;
 }
 
+.advisor-question .qa-marker {
+  color: var(--amber);
+  font: 850 12px/1 var(--mono);
+}
+
+.advisor-result .qa-marker {
+  color: var(--blue);
+  font: 850 12px/1 var(--mono);
+}
+
 .advisor-result {
-  padding: 11px 12px;
+  position: relative;
+  padding: 12px 14px 12px 52px;
   border: 1px solid var(--line);
   border-radius: 5px;
   background: var(--surface-2);
+}
+
+.advisor-result > .qa-marker {
+  color: var(--blue);
+  background: var(--blue-soft);
 }
 
 .advisor-result code {
@@ -1211,6 +1381,10 @@ input:focus-visible {
     padding-left: 0;
   }
 
+  .problem-first {
+    margin-left: 0;
+  }
+
   .workspace {
     grid-template-columns: 1fr;
   }
@@ -1258,6 +1432,15 @@ input:focus-visible {
 
   .draft-badge {
     margin-top: 14px;
+  }
+
+  .problem-first {
+    padding: 15px;
+  }
+
+  .problem-comparison,
+  .problem-answer {
+    grid-template-columns: 1fr;
   }
 
   .cell,
