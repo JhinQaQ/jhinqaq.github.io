@@ -20,7 +20,7 @@
     <main class="gate-shell" id="access-gate">
       <section class="gate-notebook" aria-labelledby="gate-title">
         <header class="gate-topbar">
-          <p>research / private / walkthrough.ipynb</p>
+          <p>research / private / linkscope-working-notes.ipynb</p>
           <a href="/" aria-label="Return to Jin Yang's homepage">JY / home</a>
         </header>
 
@@ -28,14 +28,15 @@
           <div class="gate-cell__rail" aria-hidden="true">In&nbsp;[ ]</div>
           <div class="gate-cell__main">
             <div class="gate-cell__head">
-              <code>unlock(private_research_draft)</code>
+              <code>open(jin.linkscope_working_note)</code>
             </div>
             <div class="gate-cell__body">
-              <p class="gate-kicker">encrypted research draft</p>
-              <h1 id="gate-title">Run the private research notebook</h1>
+              <p class="gate-kicker">private working note</p>
+              <h1 id="gate-title">Open my LinkScope working note</h1>
               <p class="gate-copy">
-                Enter the shared access phrase. A private password link is also
-                consumed locally and removed from the address before decryption.
+                Use the shared access phrase. If I sent you the complete
+                password link, this page consumes it locally and removes it
+                from the address before opening the note.
               </p>
 
               <form id="unlock-form" class="unlock-form">
@@ -62,7 +63,7 @@
                 </div>
                 <button class="unlock-button" type="submit">
                   <span aria-hidden="true">▶</span>
-                  <span>run cell</span>
+                  <span>open note</span>
                 </button>
                 <p
                   class="gate-status"
@@ -70,7 +71,7 @@
                   role="status"
                   aria-live="polite"
                 >
-                  The phrase is never sent to a server.
+                  The phrase stays in this browser and is never sent to a server.
                 </p>
               </form>
             </div>

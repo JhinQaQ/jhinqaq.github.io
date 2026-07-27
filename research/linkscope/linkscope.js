@@ -824,22 +824,27 @@
     const framingLabel = make(
       "p",
       "research-domain",
-      "software verification · incremental program analysis",
+      "my current direction · software verification + incremental program analysis",
+    );
+    const researchQuestion = make("div", "research-question");
+    researchQuestion.append(
+      make("p", "research-frame-label", "The problem I am trying to solve"),
+      make("h2", "research-claim", data.meta.oneSentenceClaim),
     );
     const fixedFrame = make("div", "research-frame-card");
     fixedFrame.dataset.kind = "baseline";
     fixedFrame.append(
-      make("p", "research-frame-label", "What is already solved"),
-      make("h3", "", "One fixed snapshot"),
+      make("p", "research-frame-label", "What I take as the baseline"),
+      make("h3", "", "Fresh verification already works"),
       make("p", "", data.model.coreDistinction.traditional),
       make("code", "", data.methods.find((item) => item.id === "fresh").call),
     );
     const incrementalFrame = make("div", "research-frame-card");
     incrementalFrame.dataset.kind = "question";
     incrementalFrame.append(
-      make("p", "research-frame-label", "Where the research begins"),
-      make("h3", "", "The resolved program changes"),
-      make("p", "research-claim", data.meta.oneSentenceClaim),
+      make("p", "research-frame-label", "What I want to add"),
+      make("h3", "", "Safe reuse at the next snapshot"),
+      make("p", "", data.model.coreDistinction.linkscope),
       make(
         "code",
         "",
@@ -848,7 +853,12 @@
         ).statement,
       ),
     );
-    framing.append(framingLabel, fixedFrame, incrementalFrame);
+    framing.append(
+      framingLabel,
+      researchQuestion,
+      fixedFrame,
+      incrementalFrame,
+    );
 
     const intro = make("div", "problem-intro");
     intro.append(
@@ -860,11 +870,11 @@
 
     const storyHead = make("div", "story-head");
     storyHead.append(
-      make("h3", "", "Run the same property through three snapshots"),
+      make("h3", "", "Here is the small example I am using"),
       make(
         "p",
         "",
-        "Choose a snapshot to load its exact code change, proof work, and verifier result.",
+        "Choose a snapshot to see the code change, the proof work, and the result I expect.",
       ),
     );
     const snapshotStory = make("div", "snapshot-story");
@@ -903,9 +913,9 @@
 
     const comparison = make("div", "problem-comparison");
     for (const [kind, label, copy] of [
-      ["baseline", "Fresh baseline", data.problemFirst.baseline],
-      ["failure", "Unsafe transport", data.problemFirst.failure],
-      ["solution", "LinkScope response", data.problemFirst.solution],
+      ["baseline", "What already works", data.problemFirst.baseline],
+      ["failure", "What goes wrong", data.problemFirst.failure],
+      ["solution", "My proposed rule", data.problemFirst.solution],
     ]) {
       const card = make("div", "problem-card");
       card.dataset.kind = kind;
@@ -920,11 +930,11 @@
 
     const guideHead = make("div", "story-head");
     guideHead.append(
-      make("h3", "", "Compare the four important verifier runs"),
+      make("h3", "", "This is the comparison I care about"),
       make(
         "p",
         "",
-        "The first pair shows the reuse opportunity; the second pair shows the stale-proof failure and the sound response.",
+        "At S1 I want to keep real proof work; at S2 I need to reject stale evidence.",
       ),
     );
     const controls = make("div", "problem-controls");
@@ -1336,7 +1346,7 @@
     }
     const boundaryHeading = make("div", "boundary-heading");
     boundaryHeading.append(
-      make("p", "advisor-eyebrow", "honest status"),
+      make("p", "advisor-eyebrow", "where I think the idea stands"),
       make("h3", "", data.noveltyBoundary.candidateTopic),
       make("p", "", data.noveltyBoundary.candidateContribution),
     );
@@ -1344,12 +1354,12 @@
     for (const [kind, title, items] of [
       [
         "solved",
-        "What the worked example establishes",
+        "What I can show in this example",
         data.noveltyBoundary.whatTheExampleProves,
       ],
       [
         "open",
-        "What it does not establish",
+        "What I still need to prove",
         data.noveltyBoundary.whatTheExampleDoesNotProve,
       ],
     ]) {
@@ -1366,7 +1376,7 @@
       thresholdList.append(make("li", "", item)),
     );
     threshold.append(
-      make("h3", "", "What would make this a paper"),
+      make("h3", "", "What I think I need for a paper"),
       thresholdList,
       make(
         "p",
@@ -1402,12 +1412,12 @@
     refs.priorOutput.setAttribute("role", "tabpanel");
     const priorCovered = make("div", "prior-card");
     priorCovered.dataset.kind = "covered";
-    priorCovered.append(make("strong", "", "already covers"));
+    priorCovered.append(make("strong", "", "what it already gives me"));
     refs.priorCoveredText = make("p");
     priorCovered.append(refs.priorCoveredText);
     const priorMissing = make("div", "prior-card");
     priorMissing.dataset.kind = "missing";
-    priorMissing.append(make("strong", "", "candidate boundary to test"));
+    priorMissing.append(make("strong", "", "what I still need to check"));
     refs.priorMissingText = make("p");
     refs.priorLinkSlot = make("div");
     priorMissing.append(refs.priorMissingText, refs.priorLinkSlot);
@@ -1419,7 +1429,11 @@
       boundaryGrid,
       threshold,
       noveltyWarning,
-      make("p", "advisor-eyebrow", "closest work — click to compare"),
+      make(
+        "p",
+        "advisor-eyebrow",
+        "closest work I still need to compare against",
+      ),
       priorTabs,
       refs.priorOutput,
     );
