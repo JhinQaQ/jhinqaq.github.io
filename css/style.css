@@ -1077,34 +1077,27 @@ body {
   font-size: 0.9rem;
 }
 #hero .contact-row .contact-link,
-#hero .contact-row .cv-link {
+#hero .contact-row .background-link {
   color: #22272a;
   text-decoration: none;
   background: none;
   transition: color 0.2s ease;
 }
 #hero .contact-row .contact-link:hover,
-#hero .contact-row .cv-link:hover {
+#hero .contact-row .background-link:hover {
   color: #cc2a41;
   background: none;
 }
 #hero .contact-row .contact-link i,
-#hero .contact-row .cv-link i {
+#hero .contact-row .background-link i {
   margin-right: 0.3rem;
   color: #cc2a41;
 }
-#hero .contact-row .cv-link {
+#hero .contact-row .background-link {
   font-weight: 500;
 }
-#hero .contact-row .cv-link i {
+#hero .contact-row .background-link i {
   color: #cc2a41;
-}
-#hero .contact-row .location {
-  color: #666;
-}
-#hero .contact-row .location i {
-  margin-right: 0.3rem;
-  color: rgba(86,124,119,0.8);
 }
 #hero .contact-row .divider {
   color: #858585;
@@ -1120,12 +1113,6 @@ body {
 }
 #about .bio-text p:last-child {
   margin-bottom: 0;
-}
-#about .bio-text .personal-note {
-  color: #666;
-  font-style: italic;
-  padding-left: 1rem;
-  border-left: 3px solid #cc2a41;
 }
 #interests {
   margin-bottom: 1.2rem;
@@ -1427,6 +1414,63 @@ article .content .caption {
   .article-tag:before,
   .article-category:before {
     content: "|";
+  }
+}
+.background-page {
+  padding-bottom: 2rem;
+}
+.background-page .background-intro {
+  margin-bottom: 2rem;
+}
+.background-page .background-intro h1 {
+  margin: 0 0 0.75rem;
+}
+.background-page p {
+  margin: 0.35rem 0 0;
+  text-align: left;
+  hyphens: none;
+  -moz-hyphens: none;
+  -ms-hyphens: none;
+  -webkit-hyphens: none;
+}
+.background-page section {
+  margin-top: 2rem;
+}
+.background-page h2 {
+  margin: 0 0 0.5rem;
+}
+.background-page .background-entry {
+  padding: 1rem 0;
+  border-bottom: 1px solid #666;
+}
+.background-page .background-entry:last-child {
+  border-bottom: 0;
+}
+.background-page .background-entry h3 {
+  margin: 0;
+  color: #22272a;
+  font-size: 1rem;
+  line-height: 1.5;
+  text-decoration: none;
+}
+.background-page .entry-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 9rem;
+  align-items: baseline;
+  gap: 0.25rem 1rem;
+}
+.background-page .entry-period {
+  color: #666;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.background-page .entry-role {
+  color: #666;
+  font-size: 0.9rem;
+}
+@media (max-width: 540px) {
+  .background-page .entry-heading {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 #archive .post-year {
