@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#101117">
+  <meta name="description" content="Learn how MEV arbitrage works. Find a route through liquidity pools, size the trade, and watch every swap change the reserves.">
+  <title>MEV Lab · Find the loop, size the trade</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" type="module"></script>
+</head>
+<body>
+  <a class="skip-link" href="#find">Skip to the pool map</a>
+  <header class="site-header">
+    <div class="shell header-inner">
+      <a class="brand" href="./">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>MEV <span>Lab</span></span>
+      </a>
+      <nav aria-label="Main navigation">
+        <a href="#find">Find a path</a>
+        <a href="#size">Size a trade</a>
+        <a class="source-link" href="https://github.com/JhinQaQ/jhinqaq.github.io/tree/main/research/mev">Source <span aria-hidden="true">↗</span></a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <section class="hero">
+      <div class="shell hero-inner">
+        <p class="eyebrow">Maximal extractable value</p>
+        <h1>Find the loop. <em>Size the trade.</em></h1>
+        <p>Find a route through liquidity pools, then choose how much USDC to trade.</p>
+      </div>
+    </section>
+
+    <section class="shell stage" id="find" aria-labelledby="find-title">
+      <div class="stage-heading">
+        <div>
+          <h2 id="find-title">Find a path</h2>
+          <p>Each pool swaps two tokens. Click pools to choose which ones the search can use.</p>
+        </div>
+        <div class="market-label"><span aria-hidden="true"></span> Simulated market</div>
+      </div>
+      <noscript><p class="no-script">Enable JavaScript to run the simulator in your browser.</p></noscript>
+      <div class="market-grid">
+        <section class="panel map-panel" aria-labelledby="map-title">
+          <div class="panel-heading">
+            <h3 id="map-title">Pool map</h3>
+            <span id="pool-count" class="small-mono">4 of 4 pools enabled</span>
+          </div>
+          <div class="network" id="network">
+            <canvas id="pool-map" aria-hidden="true"></canvas>
+            <div class="token node-usdc"><span class="coin usdc" aria-hidden="true">$</span><strong>USDC</strong><small>Start / finish</small></div>
+            <div class="token node-eth"><span class="coin eth" aria-hidden="true"><i></i></span><strong>ETH</strong></div>
+            <div class="token node-dai"><span class="coin dai" aria-hidden="true">D</span><strong>DAI</strong></div>
+            <button class="pool-node" data-pool="A" type="button" aria-pressed="true">Pool A</button>
+            <button class="pool-node" data-pool="B" type="button" aria-pressed="true">Pool B</button>
+            <button class="pool-node" data-pool="C" type="button" aria-pressed="true">Pool C</button>
+            <button class="pool-node" data-pool="D" type="button" aria-pressed="true">Pool D</button>
+          </div>
+          <div class="market-settings">
+            <label class="market-field" for="user-buy">
+              <span>Earlier trade in Pool A</span>
+              <span class="number-field"><input id="user-buy" type="number" min="0" max="100000" step="any" inputmode="decimal" value="20000"><span>USDC to buy ETH</span></span>
+            </label>
+            <label class="market-field" for="gas-cost">
+              <span>Network fee (gas)</span>
+              <span class="number-field"><input id="gas-cost" type="number" min="0" max="50000" step="any" inputmode="decimal" value="15"><span>USDC</span></span>
+            </label>
+            <p class="market-note" id="market-note"></p>
+          </div>
+        </section>
+
+        <section class="panel paths-panel" aria-labelledby="paths-title">
+          <div class="panel-heading">
+            <h3 id="paths-title">Routes back to USDC</h3>
+            <span class="small-mono" id="path-count"></span>
+          </div>
+          <p class="panel-copy">Pick a loop to explore. Each route shows the best profit it can make after fees.</p>
+          <div class="route-list" id="routes" role="group" aria-label="Arbitrage paths"></div>
+          <button class="text-button" type="button" id="all-routes" aria-expanded="false" aria-controls="routes" hidden></button>
+          <a class="button primary to-size" id="to-size" href="#size">Size this trade <span aria-hidden="true">↓</span></a>
+        </section>
+      </div>
+    </section>
+
+    <section class="shell stage size-stage" id="size" aria-labelledby="size-title">
+      <div class="stage-heading">
+        <div>
+          <h2 id="size-title">Choose an amount</h2>
+          <p>A bigger trade moves prices more. Drag the slider to see how the same path can make or lose money.</p>
+        </div>
+      </div>
+      <div class="amount-grid">
+        <section class="panel amount-panel" aria-labelledby="amount-title">
+          <div class="panel-heading">
+            <h3 id="amount-title">Profit by trade size</h3>
+            <span id="size-route" class="small-mono"></span>
+          </div>
+          <div class="amount-controls">
+            <label class="amount-entry" for="trade-amount">
+              <span>Starting amount</span>
+              <span class="number-field"><input id="trade-amount" type="number" min="1" max="250000" step="any" inputmode="decimal" value="5000"><span>USDC</span></span>
+            </label>
+            <div class="slider-entry">
+              <label for="size-slider" class="sr-only">Starting amount in USDC</label>
+              <input id="size-slider" type="range" min="1" max="30000" step="1" value="5000">
+              <div class="slider-labels" aria-hidden="true"><span>1 USDC</span><span id="slider-max">30,000 USDC</span></div>
+            </div>
+          </div>
+          <figure class="profit-figure">
+            <div class="chart-area"><canvas id="profit-chart" role="img" aria-label="Net profit by input amount"></canvas></div>
+            <figcaption class="chart-key"><span>Your amount</span><span class="optimum-key">Best amount</span><span class="axis-key">Trade amount in USDC</span></figcaption>
+          </figure>
+          <p class="empty-copy" id="no-amount" hidden>Choose a route to see how its profit changes with trade size.</p>
+        </section>
+        <aside class="panel result-panel" aria-labelledby="result-title">
+          <p class="result-eyebrow" id="result-title">Net profit</p>
+          <output class="net-value" id="net-value" for="trade-amount size-slider" aria-live="off">—</output>
+          <div id="amount-result"></div>
+          <button class="button secondary best-button" id="best-size" type="button" disabled>Use best amount</button>
+        </aside>
+      </div>
+      <p class="sr-only" id="announcement" role="status" aria-atomic="true"></p>
+    </section>
+
+    <section class="shell stage swaps-stage" aria-labelledby="swaps-title">
+      <div class="stage-heading">
+        <div>
+          <h2 id="swaps-title">Watch the pools change</h2>
+          <p>Pick a swap to see what enters the pool, what leaves, and how its price moves.</p>
+        </div>
+      </div>
+      <section class="panel swap-panel" aria-label="Swap details">
+        <div id="swap-steps" class="swap-steps" role="group" aria-label="Swaps to inspect"></div>
+        <div id="swap-detail"></div>
+      </section>
+    </section>
+
+    <section class="shell learn" id="learn" aria-labelledby="learn-title">
+      <h2 id="learn-title">Where the MEV comes from</h2>
+      <p>The user’s earlier swap makes ETH more expensive in Pool A. A searcher can capture the gap by getting a trade included after it. Set the earlier trade to <strong>0 USDC</strong> and watch the opportunity disappear.</p>
+      <div class="learn-grid">
+        <article class="panel">
+          <h3>Path finding</h3>
+          <p>The lab checks two- and three-swap loops that start and end in USDC, using each pool at most once. The token path and the choice of pools both matter.</p>
+        </article>
+        <article class="panel">
+          <h3>Amount sizing</h3>
+          <p>Every swap changes the reserves, so twice the input yields less than twice the output. Net profit is the USDC you get back minus your starting USDC and gas. The swap fees are already included in what you get back.</p>
+        </article>
+      </div>
+      <p class="model-note">The four modeled pools use constant-product pricing with a 0.30% fee per swap. The size calculation uses continuous amounts and assumes the searcher can fund the route. The swaps in a route execute together in one transaction.</p>
+      <div class="references">
+        <a href="https://ethereum.org/developers/docs/mev/">MEV on Ethereum <span aria-hidden="true">↗</span></a>
+        <a href="https://developers.uniswap.org/docs/get-started/concepts/how-uniswap-works">How pools price swaps <span aria-hidden="true">↗</span></a>
+      </div>
+    </section>
+  </main>
+  <footer class="site-footer">
+    <div class="shell footer-inner"><span>MEV Lab</span><a href="#find">Back to the map <span aria-hidden="true">↑</span></a></div>
+  </footer>
+</body>
+</html>
