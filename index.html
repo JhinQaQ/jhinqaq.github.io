@@ -2,7 +2,47 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>jinwrite.com</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jin’s writing</title>
+  <style>
+    body {
+      margin: 0;
+      background: #fafafa;
+      color: #22272a;
+    }
+
+    main {
+      box-sizing: border-box;
+      min-height: 100vh;
+      min-height: 100svh;
+      display: grid;
+      place-items: center;
+      padding: 1.25rem;
+      text-align: center;
+    }
+
+    h1 {
+      margin: 0;
+      font: 400 clamp(1.6rem, 4vw, 3rem) / 1.25 Georgia, "Times New Roman", serif;
+      letter-spacing: -0.025em;
+      text-wrap: balance;
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      h1 {
+        animation: appear 1.8s ease-in-out 0.25s backwards;
+      }
+    }
+
+    @keyframes appear {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+  </style>
 </head>
-<body></body>
+<body>
+  <main>
+    <h1>A record of Jin’s writing.</h1>
+  </main>
+</body>
 </html>
